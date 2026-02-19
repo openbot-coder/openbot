@@ -1,10 +1,15 @@
 [project]
 name = "openbot"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI Bot with multi-channel support and self-evolution capabilities"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "langchain>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.1.0",
+]
 
 [project.scripts]
 openbot = "openbot:main"

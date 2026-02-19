@@ -1,0 +1,19 @@
+{
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key": "${OPENAI_API_KEY}",
+    "temperature": 0.7
+  },
+  "channels": {
+    "console": {
+      "enabled": true,
+      "prompt": "openbot> "
+    }
+  },
+  "evolution": {
+    "enabled": true,
+    "auto_test": true,
+    "require_approval": true
+  }
+}
