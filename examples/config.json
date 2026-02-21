@@ -3,14 +3,14 @@
     "doubao-seed-2-0-pro-260215": {
       "model_provider": "openai",
       "model": "ark-code-latest",
-      "api_key": "38b45a58-e42c-428d-8b58-71dc80d1fa02",
+      "api_key": ${DOUBAO_API_KEY},
       "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
       "temperature": 0.7
     },
     "mimo-v2-flash": {
       "model_provider": "openai",
       "model": "mimo-v2-flash",
-      "api_key": "1234567890",
+      "api_key": ${XIAOMI_API_KEY},
       "base_url": "https://api.xiaomimimo.com/v1",
       "temperature": 0.7
     }
