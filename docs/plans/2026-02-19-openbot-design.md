@@ -37,10 +37,14 @@ OpenBot 是一个可以通过命令行运行的 AI Bot，具备对话交互、�
                                 │
 ┌───────────────────────────────▼─────────────────────────────────┐
 │                         BotFlow                                 │
-│  ┌──────────────┬──────────────┬──────────────┬──────────────┐  │
-│  │   Channel    │   Session    │   Message    │  Evolution   │  │
-│  │   Router     │   Manager    │   Processor  │   Controller │  │
-│  └──────────────┴──────────────┴──────────────┴──────────────┘  │
+│  ┌────────────────┬──────────────┬──────────────┬──────────────┐  │
+│  │ChatChannelMgr  │   Session    │   Message    │  Evolution   │  │
+│  │                │   Manager    │   Processor  │   Controller │  │
+│  └────────────────┼──────────────┴──────────────┴──────────────┘  │
+│                   │                                               │
+│                   │  ┌───────────────────────────────┐            │
+│                   │  │           TaskManager          │            │
+│                   │  └───────────────────────────────┘            │
 └───────────────────────────────┬─────────────────────────────────┘
                                 │
 ┌───────────────────────────────▼─────────────────────────────────┐
@@ -61,35 +65,50 @@ OpenBot 是一个可以通过命令行运行的 AI Bot，具备对话交互、�
 
 **命令格式**：
 ```bash
-openbot                    # 启动 REPL 模式
-openbot --config path.json # 指定配置文件
-openbot --channel console  # 指定启动的 channel
+openbot server --config path.json                 # 启动服务器模式，指定配置文件
+openbot server --config path.json --console       # 启动服务器模式，指定配置文件并启用控制台
+openbot --url ws://127.0.0.1/chat --config client.json --token $OPENBOT_KEY  # 启动客户端模式，指定 WebSocket URL、配置文件和令牌
 ```
 
 **职责**：
 - 解析命令行参数
 - 加载配置文件
 - 初始化日志系统
-- 启动 BotFlow
+- 启动 BotFlow（服务器模式或客户端模式）
 
 ---
 
 ### 3.2 ChatChannel Layer
 
-**职责**：处理不同渠道的消息输入输出，统一消息格式。
+**职责**：处理不同渠道的消息输入输出，统一消息格式，将收到的消息放入 message queue 中，由 botflow 统一处理。
 
 **核心接口**：
 ```python
 from abc import ABC, abstractmethod
-from typing import AsyncIterator
-from dataclasses import dataclass
+from typing import AsyncIterator, Literal
+from enum import StrEnum
+from pydantic import BaseModel, Field
 
-from pydantic import BaseModel
+class ContentType(StrEnum):
+    TEXT = "text"
+    VIDEO = "video"
+    IMAGE = "image"
+    FILE = "file"
+    LINK = "link"
 
-class Message(BaseModel):
-    content: str
-    role: str  # "user" | "assistant"
-    metadata: dict | None = None
+class ChatMessage(BaseModel):
+    channel_id: str = Field(default="", description="渠道 ID")
+    msg_id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()), description="消息 ID"
+    )
+    content: str = Field(default="", description="消息内容")
+    content_type: ContentType = Field(
+        default=ContentType.TEXT, description="消息内容类型"
+    )
+    role: Literal["user", "bot", "system"] = Field(
+        default="user", description="消息角色"
+    )
+    metadata: dict = Field(default_factory=dict, description="消息元数据")
 
 class ChatChannel(ABC):
     @abstractmethod
@@ -98,30 +117,39 @@ class ChatChannel(ABC):
         pass
     
     @abstractmethod
-    async def send(self, message: Message) -> None:
+    async def send(self, message: ChatMessage) -> None:
         """发送完整消息"""
         pass
     
     @abstractmethod
-    async def send_stream(self, stream: AsyncIterator[str]) -> None:
-        """发送流式响应"""
-        pass
-    
-    @abstractmethod
-    async def receive(self) -> AsyncIterator[Message]:
-        """接收消息流"""
+    async def on_receive(self, message: ChatMessage) -> None:
+        """处理接收消息"""
         pass
     
     @abstractmethod
     async def stop(self) -> None:
         """停止 Channel"""
         pass
+    
+    def set_message_queue(self, message_queue: asyncio.Queue) -> None:
+        """设置消息 Queue"""
+        self._message_queue = message_queue
+    
+    @property
+    def message_queue(self) -> asyncio.Queue:
+        """获取消息 Queue"""
+        if hasattr(self, "_message_queue"):
+            return self._message_queue
+        else:
+            raise AttributeError("message_queue not set")
 ```
 
 **MVP 实现 - ConsoleChannel**：
-- REPL 模式交互
-- 支持多行输入
-- 支持 Markdown 渲染（可选）
+- 使用 prompt_toolkit 实现增强的命令行交互
+- 使用 rich 库实现 Markdown 渲染和美观的终端输出
+- 支持命令补全、历史记录、状态提示
+- 支持基本命令：exit、help、clear、history
+- 支持流式响应显示
 
 ---
 
@@ -129,29 +157,66 @@ class ChatChannel(ABC):
 
 **职责**：组织和编排 ChatChannels 和 DeepAgents Core 的调度，同时负责自升级流程。
 
-#### 3.3.1 Channel Router
+#### 3.3.1 ChatChannelManager
 
 管理多个 ChatChannel 的启停和消息路由。
 
 ```python
-class ChannelRouter:
-    def __init__(self):
-        self.channels: dict[str, ChatChannel] = {}
+class ChatChannelManager:
+    def __init__(self) -> None:
+        self._channels: dict[str, ChatChannel] = {}
+        self._message_queue = asyncio.Queue()
+    
+    async def on_receive(self, message: ChatMessage) -> None:
+        """处理接收消息"""
+        self._message_queue.put_nowait(message)
+    
+    async def send(self, message: ChatMessage) -> None:
+        """发送消息"""
+        if message.channel_id in self._channels:
+            await self._channels[message.channel_id].send(message)
+        else:
+            logging.error(f"Channel {message.channel_id} not found")
     
     def register(self, name: str, channel: ChatChannel) -> None:
         """注册 Channel"""
-        pass
+        channel.set_message_queue(self._message_queue)
+        self._channels[name] = channel
     
-    async def start_all(self) -> None:
+    def get(self, name: str) -> ChatChannel:
+        """获取 Channel"""
+        return self._channels.get(name, None)
+    
+    async def start(self) -> None:
         """启动所有 Channel"""
+        for channel in self._channels.values():
+            await channel.start()
+    
+    async def stop(self) -> None:
+        """停止所有 Channel"""
+        for channel in self._channels.values():
+            await channel.stop()
+```
+
+#### 3.3.2 TaskManager
+
+管理任务队列和任务执行。
+
+```python
+class TaskManager:
+    def __init__(self):
+        self.task_queue = asyncio.PriorityQueue()
+    
+    async def add_task(self, task: Task) -> None:
+        """添加任务到队列"""
         pass
     
-    async def broadcast(self, message: Message) -> None:
-        """广播消息到所有 Channel"""
+    async def get_task(self) -> Task:
+        """获取下一个任务"""
         pass
 ```
 
-#### 3.3.2 Session Manager
+#### 3.3.3 Session Manager
 
 管理用户会话状态。
 
@@ -167,7 +232,7 @@ class Session(BaseModel):
 
 class SessionManager:
     def __init__(self):
-        self.sessions: dict[str, Session] = {}
+        self._sessions: dict[str, Session] = {}
     
     def create(self, user_id: str) -> Session:
         """创建新会话"""
@@ -182,30 +247,30 @@ class SessionManager:
         pass
 ```
 
-#### 3.3.3 Message Processor
+#### 3.3.4 Message Processor
 
 消息预处理、后处理、格式转换。
 
 ```python
 class MessageProcessor:
-    def preprocess(self, message: Message) -> Message:
+    def preprocess(self, message: HumanMessage) -> HumanMessage:
         """预处理：清理、格式化用户输入"""
         pass
     
-    def postprocess(self, message: Message) -> Message:
+    def postprocess(self, message: AnyMessage) -> AnyMessage:
         """后处理：格式化 AI 输出"""
         pass
 ```
 
-#### 3.3.4 Evolution Controller
+#### 3.3.5 Evolution Controller
 
 编排自升级流程。
 
 ```python
 class EvolutionController:
     def __init__(self, git_manager: GitManager, approval_system: ApprovalSystem):
-        self.git_manager = git_manager
-        self.approval_system = approval_system
+        self._git_manager = git_manager
+        self._approval_system = approval_system
     
     async def propose_change(self, change: CodeChange) -> bool:
         """提议代码修改，等待用户审批"""
@@ -218,6 +283,57 @@ class EvolutionController:
     async def rollback(self, commit_hash: str) -> bool:
         """回滚到指定版本"""
         pass
+```
+
+#### 3.3.6 BotFlow 核心实现
+
+```python
+class BotFlow:
+    def __init__(self, config: OpenbotConfig):
+        self._config = config
+        # 初始化核心组件
+        self.session_manager = SessionManager()
+        self.message_processor = MessageProcessor()
+        # 初始化渠道
+        self._channel_manager = ChatChannelManager()
+        # 初始化智能体
+        self._bot = AgentCore(self._config.model_configs, self._config.agent_config)
+        # 初始化任务队列
+        self.task_manager = TaskManager()
+        # 运行状态
+        self._stop_event = asyncio.Event()
+    
+    def channel_manager(self) -> ChatChannelManager:
+        """获取 Channel 管理器"""
+        return self._channel_manager
+    
+    async def initialize(self) -> None:
+        """初始化智能体"""
+        # 初始化渠道
+        for channel_type, channel_config in self._config.channels.items():
+            enabled = channel_config.enabled
+            if enabled:
+                channel = ChannelBuilder.create_channel(
+                    channel_type, **channel_config.init_kwargs
+                )
+                self._channel_manager.register(channel.channel_id, channel)
+        await self._channel_manager.start()
+    
+    async def run(self) -> None:
+        """运行智能体"""
+        await self.initialize()
+        self._stop_event.clear()
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    task = await self.task_manager.get_task()
+                    await task.run()
+                except KeyboardInterrupt:
+                    self._stop_event.set()
+                except Exception as e:
+                    logging.error(f"Error running task: {e}")
+        finally:
+            await self._channel_manager.stop()
 ```
 
 ---
@@ -234,14 +350,16 @@ class EvolutionController:
 
 **MVP 实现**：
 ```python
-from langchain_deepagents import DeepAgent
+from langchain_deepagents import create_deep_agent
 
 class AgentCore:
-    def __init__(self, config: dict):
-        self.agent = DeepAgent(
-            model=config["llm"]["model"],
-            api_key=config["llm"]["api_key"],
-            temperature=config["llm"]["temperature"],
+    def __init__(self, model_configs: Dict[str, ModelConfig], agent_config: AgentConfig):
+        self.model_configs = model_configs
+        self.agent_config = agent_config
+        # 初始化 DeepAgent 或其他 Agent 实现
+        self._agent = create_deep_agent(
+            model_configs=model_configs,
+            agent_config=agent_config
         )
     
     async def process(self, message: str, session: Session) -> str:
@@ -255,16 +373,29 @@ class AgentCore:
 
 ```json
 {
-  "llm": {
-    "provider": "openai",
-    "model": "gpt-4o",
-    "api_key": "${OPENAI_API_KEY}",
-    "temperature": 0.7
+  "model_configs": {
+    "default": {
+      "model_provider": "openai",
+      "model": "gpt-4o",
+      "api_key": "${OPENAI_API_KEY}",
+      "temperature": 0.7,
+      "base_url": "https://api.openai.com/v1"
+    }
+  },
+  "agent_config": {
+    "name": "openbot",
+    "system_prompt": "你是一个智能助手，你的任务是回答用户的问题。",
+    "skills": [],
+    "memory": [],
+    "tools": [],
+    "debug": false
   },
   "channels": {
     "console": {
       "enabled": true,
-      "prompt": "openbot> "
+      "init_kwargs": {
+        "prompt": "openbot> "
+      }
     }
   },
   "evolution": {
@@ -283,7 +414,6 @@ class AgentCore:
 openbot/
 ├── src/openbot/
 │   ├── __init__.py
-│   ├── main.py                 # CLI 入口
 │   ├── config.py               # 配置管理
 │   ├── channels/
 │   │   ├── __init__.py
@@ -291,16 +421,16 @@ openbot/
 │   │   └── console.py          # ConsoleChannel (MVP)
 │   ├── botflow/
 │   │   ├── __init__.py
-│   │   ├── router.py           # Channel Router
+│   │   ├── core.py             # BotFlow 核心
 │   │   ├── session.py          # Session Manager
 │   │   ├── processor.py        # Message Processor
-│   │   └── evolution.py        # Evolution Controller
+│   │   ├── evolution.py        # Evolution Controller
+│   │   ├── trigger.py          # 触发器
+│   │   ├── task.py             # 任务管理
 │   └── agents/
 │       ├── __init__.py
 │       └── core.py             # DeepAgents 核心 (MVP)
 ├── examples/
-│   ├── memory/                 # 示例记忆存储
-│   ├── events/                 # 示例事件报告
 │   └── config.json             # 示例配置文件
 ├── pyproject.toml
 └── README.md
@@ -313,10 +443,12 @@ openbot/
 | 组件 | 技术选型 |
 |------|----------|
 | LLM 抽象层 | LangChain `init_chat_model` |
-| Agent 框架 | LangChain DeepAgents |
+| Agent 框架 | LangChain `create_deep_agent` |
 | 向量存储 | Chroma / FAISS（后续） |
-| 配置管理 | JSON |
+| 配置管理 | JSON + Pydantic Settings |
 | 版本控制 | Git |
+| 命令行增强 | prompt_toolkit |
+| 终端渲染 | rich |
 
 ---
 

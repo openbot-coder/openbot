@@ -1,4 +1,4 @@
-from .base import ChatChannel, Message
+from .base import ChatChannel
 from .console import ConsoleChannel
 
-__all__ = ["ChatChannel", "Message", "ConsoleChannel"]
+__all__ = ["ChatChannel", "ConsoleChannel"]

@@ -1,77 +1,88 @@
 import asyncio
 import argparse
+import logging
 from .config import ConfigManager
-from .channels import ConsoleChannel
-from .botflow import ChannelRouter, SessionManager, MessageProcessor
-from .agents import AgentCore
+from .botflow.core import BotFlow
+
+
+async def run_server(config_path: str, console: bool = False):
+    """运行服务器模式"""
+    logging.info(f"Starting OpenBot server with config: {config_path}")
+    
+    config_manager = ConfigManager(config_path)
+    config = config_manager.get()
+    logging.info("Configuration loaded successfully")
+
+    # 如果指定了console参数，确保控制台通道启用
+    if console:
+        config.channels['console'].enabled = True
+
+    # 初始化 BotFlow
+    botflow = BotFlow(config)
+    logging.info("BotFlow initialized successfully")
+
+    try:
+        # 运行 BotFlow
+        await botflow.run()
+    except KeyboardInterrupt:
+        logging.info("Interrupted by user.")
+    except Exception as e:
+        logging.error(f"Error running server: {e}")
+    finally:
+        # 停止 BotFlow
+        await botflow.stop()
+
+
+async def run_client(url: str, config_path: str, token: str):
+    """运行客户端模式"""
+    logging.info(f"Starting OpenBot client with URL: {url}")
+    logging.info(f"Loading configuration from: {config_path}")
+    
+    # 这里可以实现WebSocket客户端
+    # 目前MVP版本只支持服务器模式
+    logging.warning("Client mode is not implemented in MVP version.")
+    logging.warning("Please use server mode instead.")
+
 
 async def main():
     """CLI 入口点"""
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="OpenBot CLI")
-    parser.add_argument("--config", type=str, help="配置文件路径")
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    
+    # 服务器模式
+    server_parser = subparsers.add_parser("server", help="Run OpenBot in server mode")
+    server_parser.add_argument("--config", type=str, default="examples/config.json", help="配置文件路径")
+    server_parser.add_argument("--console", action="store_true", help="启用控制台通道")
+    
+    # 客户端模式
+    client_parser = subparsers.add_parser("client", help="Run OpenBot in client mode")
+    client_parser.add_argument("--url", type=str, required=True, help="WebSocket URL")
+    client_parser.add_argument("--config", type=str, default="examples/config.json", help="配置文件路径")
+    client_parser.add_argument("--token", type=str, help="认证令牌")
+    
+    # 直接运行模式（向后兼容）
+    parser.add_argument("--config", type=str, default="examples/config.json", help="配置文件路径")
     parser.add_argument("--channel", type=str, default="console", help="启动的 channel")
+    
     args = parser.parse_args()
-    
-    # 加载配置
-    config_manager = ConfigManager(args.config)
-    config = config_manager.get()
-    
-    # 初始化组件
-    session_manager = SessionManager()
-    message_processor = MessageProcessor()
-    agent_core = AgentCore(config.llm.model_dump())
-    
-    # 初始化 Channel Router
-    router = ChannelRouter()
-    
-    # 注册 Console Channel
-    if config.channels.get("console", {}).enabled:
-        console_channel = ConsoleChannel(
-            prompt=config.channels.get("console", {}).prompt
-        )
-        router.register("console", console_channel)
-    
-    # 启动所有 Channel
-    await router.start_all()
-    
-    # 创建会话
-    session = session_manager.create("default-user")
-    
+
     try:
-        # 处理消息
-        if "console" in router.channels:
-            async for message in router.channels["console"].receive():
-                # 预处理消息
-                processed_message = message_processor.preprocess(message)
-                
-                # 调用 AI 处理
-                ai_response = await agent_core.process(
-                    processed_message.content,
-                    session
-                )
-                
-                # 创建响应消息
-                response_message = message.__class__(
-                    content=ai_response,
-                    role="assistant",
-                    metadata={"channel": "console"}
-                )
-                
-                # 后处理响应
-                processed_response = message_processor.postprocess(response_message)
-                
-                # 发送响应
-                await router.channels["console"].send(processed_response)
-    except KeyboardInterrupt:
-        print("\nInterrupted by user.")
-    finally:
-        # 停止所有 Channel
-        if "console" in router.channels:
-            await router.channels["console"].stop()
-        
-        # 关闭会话
-        session_manager.close(session.id)
+        if args.command == "server":
+            await run_server(args.config, args.console)
+        elif args.command == "client":
+            await run_client(args.url, args.config, args.token)
+        else:
+            # 向后兼容：直接运行
+            await run_server(args.config, True)
+    except Exception as e:
+        logging.error(f"Error: {e}")
+
 
 if __name__ == "__main__":
+    # 配置日志
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
     asyncio.run(main())
