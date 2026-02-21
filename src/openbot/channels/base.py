@@ -80,9 +80,7 @@ class ChannelBuilder:
     @classmethod
     def create_channel(cls, channel_type: str, **kwargs) -> ChatChannel:
         """创建 Channel"""
-        channel_class = cls.__channel_types.get(
-            channel_type
-        ) or cls.__channel_types.get("console")
+        channel_class = cls.__channel_types.get(channel_type)
         if channel_class:
             return channel_class(**kwargs)
         else:
@@ -104,7 +102,6 @@ class ChatChannelManager:
             await self._channels[message.channel_id].send(message)
         else:
             logging.error(f"Channel {message.channel_id} not found")
-
 
 
     def register(self, name: str, channel: ChatChannel) -> None:

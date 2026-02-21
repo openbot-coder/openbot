@@ -418,10 +418,11 @@ class CronTrigger(Trigger):
         return trigger_dt, "Running"
 
 
-def once(fire_time: datetime) -> Trigger:
+def once(fire_time: datetime = None) -> Trigger:
     """Decorator for a one-off trigger."""
-
-    return OnceTrigger(fire_time)
+    if fire_time is None:
+        fire_time = datetime.now()
+    return OnceTrigger(fire_time, skip_past=False)
 
 
 def daily(

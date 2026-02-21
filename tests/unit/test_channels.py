@@ -79,6 +79,7 @@ class TestChannelBuilder:
     
     def test_create_unknown_channel(self):
         """测试创建未知通道"""
+        # 测试创建未知通道
         with pytest.raises(ValueError):
             ChannelBuilder.create_channel("unknown")
 

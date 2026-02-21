@@ -1,3 +1,5 @@
+import os
+
 import logging
 import pathlib
 from datetime import datetime
@@ -21,6 +23,24 @@ def get_current_time() -> str:
     """获取当前时间"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+def execute_bash_command(command: str) -> str:
+    """执行 Bash 命令"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            command.split(),
+            shell=True,
+            env=os.environ,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        return f"Error: command failed with exit code {e.returncode}: {e.output}"
+    finally:
+        logging.info(f"Command: {command} executed")
 
 class AgentCore:
     def __init__(self, model_configs: Dict[str, Any], agent_config: AgentConfig):
@@ -51,10 +71,10 @@ class AgentCore:
                     f"Error initializing model {name}: {model_config}, error: {e}"
                 )
         model = self.get_chat_models("auto")
-        tools = [get_current_time]
+        tools = [get_current_time, execute_bash_command]
         memory = self._agent_config.memory
         skills = self._agent_config.skills
-        backend = FilesystemBackend(root_dir=pathlib.Path("./.trae").absolute())
+        backend = FilesystemBackend(root_dir=pathlib.Path("./").absolute())
 
         self._agent = create_deep_agent(
             model,
@@ -112,13 +132,12 @@ class AgentCore:
 
 if __name__ == "__main__":
     import asyncio
+    import os
     from openbot.config import ConfigManager
     from vxutils import loggerConfig
 
     loggerConfig(level=logging.WARNING)
-    config_path = (
-        "C:\\Users\\shale\\Documents\\trae_projects\\openbot\\examples\\config.json"
-    )
+    config_path = os.environ.get("OPENBOT_CONFIG_PATH", "examples/config.json")
     config_manager = ConfigManager(config_path)
     config = config_manager.config
     agent_config = config.agent_config

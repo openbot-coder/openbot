@@ -1,5 +1,6 @@
 import json
 import os
+import logging
 from typing import List, Dict
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -44,6 +45,7 @@ class ConfigManager:
     def __init__(self, config_path: str | None = None):
         self.config_path = config_path
         self.config = self._load_config()
+        self._validate_config()
 
     def _load_config(self) -> OpenbotConfig:
         """加载配置文件"""
@@ -54,6 +56,18 @@ class ConfigManager:
             config_dict = self._resolve_env_vars(config_dict)
             return OpenbotConfig(**config_dict)
         return OpenbotConfig()
+
+    def _validate_config(self) -> None:
+        """验证配置完整性"""
+        if not self.config.model_configs:
+            logging.warning("No model configurations provided, using defaults")
+        
+        for name, config in self.config.model_configs.items():
+            if not config.api_key:
+                logging.warning(f"API key not configured for model {name}")
+            
+            if not config.model:
+                raise ValueError(f"Model name not specified for {name}")
 
     def _resolve_env_vars(self, config_dict: dict) -> dict:
         """解析配置中的环境变量引用"""

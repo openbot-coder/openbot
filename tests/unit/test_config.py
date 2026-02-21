@@ -28,12 +28,11 @@ def test_config_manager_load_file():
 
 def test_config_env_var_substitution():
     """测试环境变量替换"""
-    # 设置环境变量
-    os.environ["TEST_API_KEY"] = "test-secret-key"
-    
-    # 创建临时配置文件
     import tempfile
     import json
+    
+    # 设置环境变量
+    os.environ["TEST_API_KEY"] = "test-secret-key"
     
     temp_config = {
         "model_configs": {
