@@ -35,24 +35,52 @@ def remove_file(file_path: str) -> Tuple[bool, str]:
     return False, f"File or directory {file_path} not found"
 
 
-def run_bash_command(command: str) -> str:
-    """执行 Bash 命令"""
+def run_bash_command(command: str, cwd: str = None) -> str:
+    """执行 Bash 命令
+
+    Args:
+        command: 要执行的命令字符串
+        cwd: 工作目录，默认为 None（使用当前目录）
+
+    Returns:
+        命令输出或错误信息
+    """
     try:
+        # 如果没有指定 cwd，尝试从环境变量获取工作目录
+        if cwd is None:
+            cwd = os.environ.get("OPENBOT_WORKSPACE", ".")
+
+        # 使用 shell=True 时，直接传递 command 字符串，不要 split()
         result = subprocess.run(
-            command.split(),
+            command,
             shell=True,
+            cwd=cwd,
             env=os.environ,
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
-        return result.stdout.strip()
+        output = result.stdout.strip() if result.stdout else ""
+        if result.stderr:
+            output += f"\n[stderr]: {result.stderr.strip()}"
+
+        return output if output else "Command executed successfully (no output)"
+
     except subprocess.CalledProcessError as e:
-        return f"Error: command failed with exit code {e.returncode}: {e.output}"
+        error_msg = f"Error: command failed with exit code {e.returncode}"
+        if e.stdout:
+            error_msg += f"\nstdout: {e.stdout.strip()}"
+        if e.stderr:
+            error_msg += f"\nstderr: {e.stderr.strip()}"
+        return error_msg
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {str(e)}"
     finally:
-        logging.info(f"Command: {command} executed")
+        logging.info(f"Command executed: {command} (cwd: {cwd})")
 
 
 class ToolsManager:

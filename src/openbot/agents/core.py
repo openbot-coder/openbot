@@ -160,6 +160,9 @@ class OpenBotExecutor:
             raise e
 
         try:
+            # 设置 OPENBOT_WORKSPACE 环境变量，供工具使用
+            os.environ["OPENBOT_WORKSPACE"] = self._agent_config.workspace
+
             # 初始化backend - workspace 现在已经是绝对路径
             backend = FilesystemBackend(
                 root_dir=self._agent_config.workspace,
