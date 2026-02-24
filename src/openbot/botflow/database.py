@@ -5,21 +5,36 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel, Field
+from enum import StrEnum
 
 
-class Message(BaseModel):
+class ContentType(StrEnum):
+    TEXT = "text"
+    VIDEO = "video"
+    IMAGE = "image"
+    FILE = "file"
+    LINK = "link"
+
+
+class ChatMessage(BaseModel):
     """消息模型"""
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    content: str
-    role: str = "user"  # user, assistant, system
-    content_type: str = "text"  # text, image, file
-    channel_id: str = ""  # channel identifier
-    input_tokens: int = 0
-    output_tokens: int = 0
-    process_time_ms: int = 0
-    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    channel_id: str = Field(default="", description="渠道 ID")
+    msg_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="消息 ID")
+    content: str = Field(default="", description="消息内容")
+    content_type: ContentType = Field(
+        default=ContentType.TEXT, description="消息内容类型"
+    )
+    role: Literal["user", "bot", "system"] = Field(
+        default="user", description="消息角色"
+    )
+    metadata: dict = Field(default_factory=dict, description="消息元数据")
+    input_tokens: int = Field(default=0, description="输入 token 数量")
+    output_tokens: int = Field(default=0, description="输出 token 数量")
+    process_time_ms: int = Field(default=0, description="处理时间（毫秒）")
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat(), description="创建时间")
+
 
 
 class DatabaseManager:
@@ -51,24 +66,34 @@ class DatabaseManager:
     async def _get_connection(self) -> aiosqlite.Connection:
         if self._connection is None:
             self._connection = await aiosqlite.connect(str(self.db_path))
+            # Enable row factory to return rows as dictionaries
+            self._connection.row_factory = aiosqlite.Row
         return self._connection
     
-    async def save_message(self, message: Message) -> bool:
+    async def save_message(self, message: ChatMessage) -> bool:
         """保存消息"""
         conn = await self._get_connection()
         await conn.execute("""
             INSERT INTO messages (id, content, role, content_type, channel_id, input_tokens, output_tokens, process_time_ms, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (message.id, message.content, message.role, message.content_type, message.channel_id,
+        """, (message.msg_id, message.content, message.role, message.content_type.value, message.channel_id,
               message.input_tokens, message.output_tokens, message.process_time_ms, message.created_at))
         await conn.commit()
         return True
     
-    async def get_messages(self, limit: int = 100) -> List[Message]:
+    async def get_messages(self, limit: int = 100) -> List[ChatMessage]:
         """获取消息列表"""
         conn = await self._get_connection()
         async with conn.execute(
             "SELECT * FROM messages ORDER BY created_at DESC LIMIT ?", (limit,)
         ) as cursor:
             rows = await cursor.fetchall()
-            return [Message(**dict(row)) for row in rows]
+            # Convert rows to ChatMessage objects, mapping 'id' to 'msg_id'
+            messages = []
+            for row in rows:
+                row_dict = dict(row)
+                # Map database column 'id' to ChatMessage field 'msg_id'
+                if 'id' in row_dict:
+                    row_dict['msg_id'] = row_dict.pop('id')
+                messages.append(ChatMessage(**row_dict))
+            return messages

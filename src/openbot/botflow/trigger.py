@@ -17,6 +17,8 @@ class Trigger(BaseModel):
     trigger_dt: datetime = Field(default_factory=datetime.now)
     interval: float = Field(default=0.0)
     status: TriggerStatus = Field(default=TriggerStatus.READY)
+    start_dt: Optional[datetime] = None
+    end_dt: Optional[datetime] = None
 
     @abstractmethod
     def next(self) -> Optional[datetime]:
