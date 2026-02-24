@@ -214,7 +214,9 @@ class OpenBotExecutor:
                 model=model,
                 tools=tools,
                 middleware=gp_middleware,
-                system_prompt=DEFAULT_SYSTEM_PROMPT_V2.format(workspace=self._agent_config.workspace),
+                system_prompt=DEFAULT_SYSTEM_PROMPT_V2.format(
+                    workspace=self._agent_config.workspace
+                ),
                 checkpointer=InMemorySaver(),
                 debug=self._agent_config.debug,
             )
