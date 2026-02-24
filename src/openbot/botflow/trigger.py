@@ -41,6 +41,7 @@ class OnceTrigger(Trigger):
 
 class IntervalTrigger(Trigger):
     """间隔触发器"""
+    end_dt: Optional[datetime] = None
     
     def next(self) -> Optional[datetime]:
         if self.status == TriggerStatus.COMPLETED:
@@ -49,7 +50,7 @@ class IntervalTrigger(Trigger):
         next_dt = self.trigger_dt + timedelta(seconds=self.interval)
         
         # 检查是否超过结束时间（如果有）
-        if hasattr(self, 'end_dt') and next_dt > self.end_dt:
+        if self.end_dt and next_dt > self.end_dt:
             self.status = TriggerStatus.COMPLETED
             return None
         

@@ -1,82 +1,114 @@
-import asyncio
 import pytest
+import asyncio
+from datetime import datetime, timedelta
 from openbot.botflow.task import Task, TaskManager
+from openbot.botflow.trigger import OnceTrigger, IntervalTrigger
+
+
+@pytest.fixture
+def event_loop():
+    """创建事件循环"""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 class TestTask:
     """测试 Task 类"""
 
-    async def test_task_run(self):
-        """测试任务运行"""
+    def test_task_creation(self):
+        """测试任务创建"""
+        
+        def test_func(a, b):
+            return a + b
+        
+        task = Task(name="test_task", func=test_func, args=(1, 2))
+        
+        assert task.name == "test_task"
+        assert task.func == test_func
+        assert task.args == (1, 2)
+        assert task.trigger is None
+        assert task.trigger_dt is None
 
-        # 创建一个简单的任务函数
+    @pytest.mark.asyncio
+    async def test_task_run_async(self):
+        """测试异步任务运行"""
+        results = []
+        
         async def test_func():
-            return "test result"
+            results.append("executed")
+        
+        task = Task(name="test", func=test_func)
+        await task.run()
+        
+        assert results == ["executed"]
 
-        # 创建任务
-        task = Task(func=test_func, priority=1)
-        result = await task.run()
-        assert result == "test result"
+    @pytest.mark.asyncio
+    async def test_task_run_sync(self):
+        """测试同步任务运行"""
+        results = []
+        
+        def test_func():
+            results.append("executed")
+        
+        task = Task(name="test", func=test_func)
+        await task.run()
+        
+        assert results == ["executed"]
+
+    @pytest.mark.asyncio
+    async def test_task_with_trigger(self):
+        """测试带触发器的任务"""
+        trigger_dt = datetime.now() + timedelta(seconds=1)
+        trigger = OnceTrigger(trigger_dt=trigger_dt)
+        
+        async def test_func():
+            pass
+        
+        task = Task(name="test", func=test_func)
+        task.set_trigger(trigger)
+        
+        assert task.trigger is trigger
+        assert task.trigger_dt is not None
 
 
 class TestTaskManager:
     """测试 TaskManager 类"""
 
-    async def test_add_task(self):
-        """测试添加任务"""
+    @pytest.mark.asyncio
+    async def test_task_manager_submit(self):
+        """测试提交任务"""
         manager = TaskManager()
-
-        # 创建一个简单的任务函数
+        
         async def test_func():
-            return "test result"
+            return "done"
+        
+        task = Task(name="test", func=test_func)
+        manager.submit(task)
+        
+        assert len(manager.list_tasks()) == 1
+        assert len(manager.list_coroutines()) == 1
 
-        # 创建任务
-        task = Task(func=test_func, priority=1)
-
-        # 添加任务
-        await manager.add_task(task)
-
-        # 验证任务队列不为空
-        # 注意：我们无法直接访问内部队列，但可以通过获取任务来验证
-        assert True
-
-    async def test_get_task(self):
-        """测试获取任务"""
+    @pytest.mark.asyncio
+    async def test_task_manager_close(self):
+        """测试关闭任务管理器"""
         manager = TaskManager()
-
-        # 创建一个简单的任务函数
+        
         async def test_func():
-            return "test result"
+            await asyncio.sleep(10)
+        
+        task = Task(name="test", func=test_func)
+        manager.submit(task)
+        
+        manager.close()
+        
+        assert len(manager.list_tasks()) == 0
 
-        # 创建任务
-        task = Task(func=test_func, priority=1)
-
-        # 添加任务
-        await manager.add_task(task)
-
-        # 获取任务
-        retrieved_task = await manager.get_task()
-        assert isinstance(retrieved_task, Task)
-
-    async def test_task_priority(self):
-        """测试任务优先级"""
+    @pytest.mark.asyncio
+    async def test_task_manager_start(self):
+        """测试启动任务管理器"""
         manager = TaskManager()
-
-        # 创建任务函数
-        async def func1():
-            return "high priority"
-
-        async def func2():
-            return "low priority"
-
-        # 创建不同优先级的任务
-        high_priority_task = Task(func=func1, priority=0)  # 优先级更高
-        low_priority_task = Task(func=func2, priority=1)  # 优先级更低
-
-        # 添加任务
-        await manager.add_task(low_priority_task)
-        await manager.add_task(high_priority_task)
-
-        # 获取任务，应该先获取高优先级任务
-        first_task = await manager.get_task()
-        assert first_task.priority == 0
+        
+        await manager.start()
+        
+        assert manager._running is True

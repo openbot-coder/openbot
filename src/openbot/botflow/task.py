@@ -15,11 +15,19 @@ from .trigger import Trigger
 class Task:
     """任务类（函数式设计）"""
     
-    def __init__(self, name: str, func: Callable, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        name: str,
+        func: Callable,
+        args: tuple = (),
+        kwargs: dict = None,
+    ) -> None:
+        if kwargs is None:
+            kwargs = {}
         self.id = str(uuid.uuid4())
         self.name = name
         self.trigger = None
-        self.trigger_dt = None  # 添加 trigger_dt 属性
+        self.trigger_dt = None
         self.created_at = datetime.now()
         self.func = func
         self.args = args
@@ -31,6 +39,15 @@ class Task:
 
     async def run(self):
         """执行任务"""
+        # 如果没有触发器，执行一次
+        if not self.trigger:
+            if inspect.iscoroutinefunction(self.func):
+                await self.func(*self.args, **self.kwargs)
+            else:
+                await asyncio.to_thread(self.func, *self.args, **self.kwargs)
+            return
+        
+        # 有触发器，循环执行
         while self.trigger_dt:
             now = datetime.now()
             if self.trigger_dt > now:
@@ -43,10 +60,7 @@ class Task:
                 await asyncio.to_thread(self.func, *self.args, **self.kwargs)
             
             # 获取下次触发时间
-            if self.trigger:
-                self.trigger_dt = self.trigger.next()
-            else:
-                self.trigger_dt = None
+            self.trigger_dt = self.trigger.next()
 
 
 class TaskManager:
