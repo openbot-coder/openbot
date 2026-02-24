@@ -1,11 +1,11 @@
-"""BotFlow 配置"""
-from pydantic import BaseModel, Field
+"""BotFlow 配置模块"""
 from typing import List
+from pydantic import BaseModel, Field
 
 
 class ChannelConfig(BaseModel):
     """通道配置"""
-    name: str = ""  # channel name: websocket, wechat, etc.
+    name: str = ""
     enabled: bool = False
     params: dict = Field(default_factory=dict)
 
