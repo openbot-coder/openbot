@@ -28,7 +28,7 @@ class GitManager:
                 cwd=self.repo_path,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
             return result.stdout.strip()
         except subprocess.CalledProcessError as e:
@@ -42,15 +42,16 @@ class GitManager:
             # 添加修改的文件
             for change in changes:
                 self._run_git_command(["add", change.file_path])
-            
+
             # 提交更改
             commit_hash = self._run_git_command(["commit", "-m", message])
-            
+
             # 提取提交哈希
             if commit_hash:
                 # 尝试从输出中提取哈希
                 import re
-                match = re.search(r'\[.*?([0-9a-f]{40})\]', commit_hash)
+
+                match = re.search(r"\[.*?([0-9a-f]{40})\]", commit_hash)
                 if match:
                     return match.group(1)
                 return commit_hash
@@ -92,7 +93,7 @@ class ApprovalSystem:
             print("\nNew content:")
             print(change.new_content)
             print("\n" + "-" * 50 + "\n")
-        
+
         # 询问用户是否批准
         while True:
             response = input("Do you approve these changes? (y/n): ").strip().lower()

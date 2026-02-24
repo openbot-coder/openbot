@@ -104,7 +104,8 @@ def create_bot(
 
     model = model_manager.get_model()
     workspace = agent_config.workspace
-    backend = FilesystemBackend(root_dir=Path(workspace).absolute(), virtual_mode=False)
+    # workspace 现在已经是绝对路径（由 ConfigManager 解析）
+    backend = FilesystemBackend(root_dir=workspace, virtual_mode=False)
     skills = agent_config.skills
     summarization_defaults = model_manager.compute_summarization_defaults()
 

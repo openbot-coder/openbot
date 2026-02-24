@@ -30,25 +30,25 @@ def test_config_env_var_substitution():
     """测试环境变量替换"""
     import tempfile
     import json
-    
+
     # 设置环境变量
     os.environ["TEST_API_KEY"] = "test-secret-key"
-    
+
     temp_config = {
         "model_configs": {
             "test": {
                 "model_provider": "openai",
                 "model": "gpt-4o",
                 "api_key": "${TEST_API_KEY}",
-                "temperature": 0.7
+                "temperature": 0.7,
             }
         }
     }
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(temp_config, f)
         temp_config_path = f.name
-    
+
     try:
         config_manager = ConfigManager(temp_config_path)
         config = config_manager.get()
@@ -56,6 +56,7 @@ def test_config_env_var_substitution():
     finally:
         # 清理
         import os
+
         os.unlink(temp_config_path)
         del os.environ["TEST_API_KEY"]
 

@@ -132,7 +132,7 @@ class ToolsManager:
 
         client = MultiServerMCPClient(new_mcp_configs)
         self._clients.append(client)
-        #tools = await client.get_tools()
+        # tools = await client.get_tools()
         return True
 
     def _resolve_env_vars(self, config_dict: dict) -> dict:

@@ -20,7 +20,7 @@ import os
 
 class CommandCompleter(Completer):
     """命令补全器"""
-    
+
     def __init__(self):
         self.commands = {
             "exit": "退出控制台",
@@ -34,7 +34,7 @@ class CommandCompleter(Completer):
             "channels": "显示可用通道",
             "version": "显示版本信息",
         }
-    
+
     def get_completions(self, document, complete_event):
         """获取补全项"""
         text = document.text.lower()
@@ -44,7 +44,7 @@ class CommandCompleter(Completer):
                     command,
                     start_position=-len(text),
                     display=command,
-                    display_meta=description
+                    display_meta=description,
                 )
 
 
@@ -55,7 +55,7 @@ class ConsoleChannel(ChatChannel):
         self.history_file = os.path.expanduser("~/.openbot_history")
         self.session = PromptSession(
             history=FileHistory(self.history_file),
-            auto_suggest=AutoSuggestFromHistory()
+            auto_suggest=AutoSuggestFromHistory(),
         )
         self.console = Console()
         self.completer = CommandCompleter()
@@ -186,14 +186,19 @@ class ConsoleChannel(ChatChannel):
                         chat_message = ChatMessage(
                             content=user_input,
                             role="user",
-                            metadata={"channel": "console", "original_message": human_message},
-                            channel_id=self.channel_id
+                            metadata={
+                                "channel": "console",
+                                "original_message": human_message,
+                            },
+                            channel_id=self.channel_id,
                         )
                         # 放入消息队列
                         try:
                             await self.message_queue.put(chat_message)
                         except Exception as e:
-                            self.console.print(f"[red]Error putting message to queue: {e}[/red]")
+                            self.console.print(
+                                f"[red]Error putting message to queue: {e}[/red]"
+                            )
                         # 等待响应
                         await self._input_blocking.wait()
                         self._input_blocking.clear()
@@ -209,7 +214,7 @@ class ConsoleChannel(ChatChannel):
         table = Table(title="[bold blue]Help[/bold blue]", border_style="blue")
         table.add_column("Command", style="green", width=15)
         table.add_column("Description", style="white")
-        
+
         table.add_row("exit, quit, q", "Exit the console")
         table.add_row("help", "Show this help message")
         table.add_row("clear", "Clear the console")
@@ -218,88 +223,102 @@ class ConsoleChannel(ChatChannel):
         table.add_row("tasks", "Show current tasks")
         table.add_row("channels", "Show available channels")
         table.add_row("version", "Show version information")
-        
+
         self.console.print(table)
-    
+
     async def _show_status(self) -> None:
         """显示系统状态"""
         table = Table(title="[bold blue]System Status[/bold blue]", border_style="blue")
         table.add_column("Component", style="cyan", width=20)
         table.add_column("Status", style="white")
-        
+
         # 检查 BotFlow 状态
         if self.botflow:
             table.add_row("BotFlow", "Running")
-            
+
             # 检查通道状态
             channel_manager = self.botflow.channel_manager()
             if channel_manager:
                 table.add_row("Channel Manager", "Initialized")
         else:
             table.add_row("BotFlow", "Not initialized")
-        
+
         table.add_row("Console Channel", "Running" if self.running else "Stopped")
         table.add_row("History File", self.history_file)
-        
+
         self.console.print(table)
-    
+
     async def _show_tasks(self) -> None:
         """显示当前任务"""
         if self.botflow and hasattr(self.botflow, "task_manager"):
             # 这里可以添加任务管理器的状态信息
-            self.console.print(Panel(
-                "Task Manager initialized\n" +
-                "(Task list functionality not implemented yet)",
-                title="[bold blue]Current Tasks[/bold blue]",
-                border_style="blue"
-            ))
+            self.console.print(
+                Panel(
+                    "Task Manager initialized\n"
+                    + "(Task list functionality not implemented yet)",
+                    title="[bold blue]Current Tasks[/bold blue]",
+                    border_style="blue",
+                )
+            )
         else:
-            self.console.print(Panel(
-                "Task Manager not initialized",
-                title="[bold blue]Current Tasks[/bold blue]",
-                border_style="blue"
-            ))
-    
+            self.console.print(
+                Panel(
+                    "Task Manager not initialized",
+                    title="[bold blue]Current Tasks[/bold blue]",
+                    border_style="blue",
+                )
+            )
+
     async def _show_channels(self) -> None:
         """显示可用通道"""
         if self.botflow:
             channel_manager = self.botflow.channel_manager()
             if channel_manager:
-                table = Table(title="[bold blue]Available Channels[/bold blue]", border_style="blue")
+                table = Table(
+                    title="[bold blue]Available Channels[/bold blue]",
+                    border_style="blue",
+                )
                 table.add_column("Channel ID", style="cyan", width=25)
                 table.add_column("Status", style="white")
-                
+
                 # 这里可以添加通道列表
                 table.add_row(self.channel_id, "Running")
-                
+
                 self.console.print(table)
             else:
-                self.console.print(Panel(
-                    "Channel Manager not initialized",
-                    title="[bold blue]Available Channels[/bold blue]",
-                    border_style="blue"
-                ))
+                self.console.print(
+                    Panel(
+                        "Channel Manager not initialized",
+                        title="[bold blue]Available Channels[/bold blue]",
+                        border_style="blue",
+                    )
+                )
         else:
-            self.console.print(Panel(
-                "BotFlow not initialized",
-                title="[bold blue]Available Channels[/bold blue]",
-                border_style="blue"
-            ))
-    
+            self.console.print(
+                Panel(
+                    "BotFlow not initialized",
+                    title="[bold blue]Available Channels[/bold blue]",
+                    border_style="blue",
+                )
+            )
+
     def _show_version(self) -> None:
         """显示版本信息"""
         try:
             import importlib.metadata
+
             version = importlib.metadata.version("openbot")
         except Exception:
             version = "0.1.0"
-        
-        self.console.print(Panel(
-            f"OpenBot version: [bold green]{version}[/bold green]\n" +
-            "Multi-channel AI Bot with self-evolution capabilities",
-            title="[bold blue]Version Information[/bold blue]",
-            border_style="blue"
-        ))
+
+        self.console.print(
+            Panel(
+                f"OpenBot version: [bold green]{version}[/bold green]\n"
+                + "Multi-channel AI Bot with self-evolution capabilities",
+                title="[bold blue]Version Information[/bold blue]",
+                border_style="blue",
+            )
+        )
 
     def _show_history(self) -> None:
         """显示命令历史"""

@@ -1,9 +1,5 @@
 import pytest
-from openbot.channels import (
-    ChatChannel,
-    ConsoleChannel,
-    WebSocketChannel
-)
+from openbot.channels import ChatChannel, ConsoleChannel, WebSocketChannel
 from openbot.channels.base import ChatChannel as BaseChatChannel
 from openbot.channels.console import ConsoleChannel as BaseConsoleChannel
 from openbot.channels.websocket import WebSocketChannel as BaseWebSocketChannel

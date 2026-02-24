@@ -11,7 +11,7 @@ from openbot.botflow.trigger import (
     daily,
     weekly,
     every,
-    crontab
+    crontab,
 )
 
 

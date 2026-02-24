@@ -28,13 +28,9 @@ class WebSocketChannel(ChatChannel):
         self.console.print(
             f"[bold green]WebSocketChannel started on ws://{self.host}:{self.port}[/bold green]"
         )
-        
+
         # 启动 WebSocket 服务器
-        self.server = await serve(
-            self._handle_connection,
-            self.host,
-            self.port
-        )
+        self.server = await serve(self._handle_connection, self.host, self.port)
 
     async def _handle_connection(self, websocket):
         """处理 WebSocket 连接"""
@@ -43,15 +39,15 @@ class WebSocketChannel(ChatChannel):
         self.console.print(
             f"[bold blue]New connection established: {websocket.remote_address}[/bold blue]"
         )
-        
+
         try:
             # 发送欢迎消息
             welcome_message = {
                 "type": "welcome",
-                "message": "Welcome to OpenBot WebSocket Channel!"
+                "message": "Welcome to OpenBot WebSocket Channel!",
             }
             await websocket.send(json.dumps(welcome_message))
-            
+
             # 处理消息
             async for message in websocket:
                 await self._process_message(websocket, message)
@@ -69,21 +65,26 @@ class WebSocketChannel(ChatChannel):
             # 解析消息
             data = json.loads(message)
             content = data.get("content", "")
-            
+
             if content:
                 # 创建 ChatMessage
                 chat_message = ChatMessage(
                     content=content,
                     role="user",
-                    metadata={"channel": "websocket", "remote_address": str(websocket.remote_address)},
-                    channel_id=self.channel_id
+                    metadata={
+                        "channel": "websocket",
+                        "remote_address": str(websocket.remote_address),
+                    },
+                    channel_id=self.channel_id,
                 )
-                
+
                 # 放入消息队列
                 try:
                     await self.message_queue.put(chat_message)
                 except Exception as e:
-                    self.console.print(f"[red]Error putting message to queue: {e}[/red]")
+                    self.console.print(
+                        f"[red]Error putting message to queue: {e}[/red]"
+                    )
         except json.JSONDecodeError:
             self.console.print("[red]Error decoding JSON message[/red]")
         except Exception as e:
@@ -98,9 +99,9 @@ class WebSocketChannel(ChatChannel):
                 "content": message.content,
                 "role": message.role,
                 "channel_id": message.channel_id,
-                "metadata": message.metadata
+                "metadata": message.metadata,
             }
-            
+
             # 发送消息到所有连接
             disconnected = set()
             for connection in self.connections:
@@ -108,7 +109,7 @@ class WebSocketChannel(ChatChannel):
                     await connection.send(json.dumps(message_data))
                 except ConnectionClosedError:
                     disconnected.add(connection)
-            
+
             # 清理断开的连接
             for connection in disconnected:
                 if connection in self.connections:
@@ -123,13 +124,9 @@ class WebSocketChannel(ChatChannel):
         async for chunk in stream:
             if hasattr(chunk, "content") and chunk.content:
                 content += chunk.content
-        
+
         # 发送完整消息
-        message = ChatMessage(
-            content=content,
-            role="bot",
-            channel_id=self.channel_id
-        )
+        message = ChatMessage(content=content, role="bot", channel_id=self.channel_id)
         await self.send(message)
 
     async def on_receive(self, message: ChatMessage) -> None:
@@ -148,4 +145,5 @@ class WebSocketChannel(ChatChannel):
 
 # 注册 WebSocketChannel
 from .base import ChannelBuilder
+
 ChannelBuilder.register("websocket", WebSocketChannel)

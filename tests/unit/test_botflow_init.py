@@ -8,20 +8,20 @@ from openbot.botflow import (
     EvolutionController,
     GitManager,
     ApprovalSystem,
-    CodeChange
+    CodeChange,
 )
 from openbot.botflow.core import BotFlow as CoreBotFlow
 from openbot.botflow.router import ChannelRouter as CoreChannelRouter
 from openbot.botflow.session import (
     Session as CoreSession,
-    SessionManager as CoreSessionManager
+    SessionManager as CoreSessionManager,
 )
 from openbot.botflow.processor import MessageProcessor as CoreMessageProcessor
 from openbot.botflow.evolution import (
     EvolutionController as CoreEvolutionController,
     GitManager as CoreGitManager,
     ApprovalSystem as CoreApprovalSystem,
-    CodeChange as CoreCodeChange
+    CodeChange as CoreCodeChange,
 )
 
 

@@ -1,20 +1,13 @@
 import asyncio
-import datetime
-import inspect
 import logging
-from typing import Any, Dict, Optional, Union
 from langchain_core.messages import AnyMessage
-from openbot.agents import AgentCore
-from openbot.config import ModelConfig, AgentConfig
 from openbot.config import OpenbotConfig
 from openbot.config import ConfigManager
-from openbot.botflow.trigger import Trigger, once
 from openbot.botflow.session import SessionManager
 from openbot.botflow.processor import MessageProcessor
-from openbot.channels.base import ChannelBuilder, ChatMessage, ContentType
+from openbot.channels.base import ChannelBuilder
 from openbot.botflow.task import Task, TaskManager
 from openbot.channels.base import ChatChannelManager
-
 
 
 class BotFlow:
@@ -26,10 +19,24 @@ class BotFlow:
         self.message_processor = MessageProcessor()
         # 初始化渠道
         self._channel_manager = ChatChannelManager()
-        
-        
+
+        # 初始化MCP工具管理器
+        self._mcp_tool_manager = None
+        if hasattr(config, "mcp_servers") and config.mcp_servers.enabled:
+            try:
+                self._mcp_tool_manager = LangChainMCPToolManager(
+                    config.mcp_servers.mcp_config_path
+                )
+                logging.info("MCP tool manager initialized successfully")
+            except Exception as e:
+                logging.error(f"Failed to initialize MCP tool manager: {e}")
+
         # 初始化智能体
-        self._bot = AgentCore(self._config.model_configs, self._config.agent_config)
+        self._bot = AgentCore(
+            self._config.model_configs,
+            self._config.agent_config,
+            self._mcp_tool_manager,
+        )
         # 初始化运行状态
         self._stop_event = asyncio.Event()
         # 初始化任务队列
@@ -52,10 +59,10 @@ class BotFlow:
                 channel.botflow = self
                 self._channel_manager.register(channel.channel_id, channel)
         await self._channel_manager.start()
-        
+
         # 启动消息处理任务
         asyncio.create_task(self._process_messages())
-    
+
     async def _process_messages(self) -> None:
         """处理消息队列"""
         while not self._stop_event.is_set():
@@ -77,7 +84,7 @@ class BotFlow:
         try:
             # 启动任务管理器
             task_manager_task = asyncio.create_task(self.task_manager.run())
-            
+
             # 等待停止事件
             await self._stop_event.wait()
         except KeyboardInterrupt:
@@ -87,50 +94,50 @@ class BotFlow:
         finally:
             self._stop_event.set()
             await self._channel_manager.stop()
-    
-    async def add_task(self, task: Task, trigger = None) -> None:
+
+    async def add_task(self, task: Task, trigger=None) -> None:
         """添加任务"""
         await self.task_manager.submit_task(task, trigger)
 
     async def stop(self) -> None:
         """停止 BotFlow"""
         self._stop_event.set()
-    
+
     async def on_receive(self, message: AnyMessage) -> None:
         """处理接收消息"""
         # 预处理消息
         processed_message = self.message_processor.preprocess(message)
-        
+
         # 创建任务处理消息
         async def process_message():
             try:
                 # 转换为 ChatMessage
                 from openbot.channels.base import ChatMessage, ContentType
-                
+
                 # 提取原始消息内容
                 content = processed_message.content
                 # 确保使用正确的 channel_id
-                channel_id = getattr(message, 'channel_id', 'console')
-                
+                channel_id = getattr(message, "channel_id", "console")
+
                 # 创建 ChatMessage
                 chat_message = ChatMessage(
                     content=content,
                     role=processed_message.role,
                     channel_id=channel_id,
                     content_type=ContentType.TEXT,
-                    metadata=processed_message.metadata
+                    metadata=processed_message.metadata,
                 )
-                
+
                 # 定义回调函数处理流式响应
                 async def callback(reply_message):
                     # 发送响应到对应渠道
                     await self._channel_manager.send(reply_message)
-                
+
                 # 调用智能体处理消息
                 await self._bot.chat(chat_message, streaming_callback=callback)
             except Exception as e:
                 logging.error(f"Error processing message: {e}")
-        
+
         # 添加任务到任务管理器
         task = Task(process_message)
         await self.add_task(task)

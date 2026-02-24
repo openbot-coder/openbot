@@ -8,10 +8,10 @@ class MessageProcessor:
         cleaned_content = message.content.strip()
 
         # 创建新的 Message 对象，保持其他属性不变
-        if hasattr(message, 'dict'):
+        if hasattr(message, "dict"):
             # 对于 Pydantic 模型，使用 dict() 方法获取所有属性
             message_dict = message.dict()
-            message_dict['content'] = cleaned_content
+            message_dict["content"] = cleaned_content
             return message.__class__(**message_dict)
         else:
             # 对于普通对象，只传递已知属性

@@ -72,7 +72,7 @@ class TaskManager:
                         except Exception as e:
                             logging.error(f"Error in task queue: {e}")
                             continue
-                        
+
                 self._task_queue.get_nowait()
                 try:
                     next(trigger)
@@ -112,7 +112,7 @@ if __name__ == "__main__":
         task_manager = TaskManager(stop_event)
         task = Task(print_hello)
         logging.info("Submitting task: print_hello")
-        await task_manager.submit_task(task, every(interval=3))        
+        await task_manager.submit_task(task, every(interval=3))
         await task_manager.run()
 
     asyncio.run(main())

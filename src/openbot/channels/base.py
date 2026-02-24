@@ -95,14 +95,13 @@ class ChatChannelManager:
     async def on_receive(self, message: ChatMessage) -> None:
         """处理接收消息"""
         self._message_queue.put_nowait(message)
-    
+
     async def send(self, message: ChatMessage) -> None:
         """发送消息"""
         if message.channel_id in self._channels:
             await self._channels[message.channel_id].send(message)
         else:
             logging.error(f"Channel {message.channel_id} not found")
-
 
     def register(self, name: str, channel: ChatChannel) -> None:
         """注册 Channel"""
@@ -112,15 +111,13 @@ class ChatChannelManager:
     def get(self, name: str) -> ChatChannel:
         """获取 Channel"""
         return self._channels.get(name, None)
-    
+
     async def start(self) -> None:
         """启动所有 Channel"""
         for channel in self._channels.values():
             await channel.start()
-    
+
     async def stop(self) -> None:
         """停止所有 Channel"""
         for channel in self._channels.values():
             await channel.stop()
-
-    

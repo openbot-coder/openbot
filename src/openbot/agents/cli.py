@@ -34,29 +34,29 @@ def setup_logging():
     """配置日志记录到文件，不在控制台输出"""
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
-    
+
     log_file = log_dir / f"openbot_{datetime.now().strftime('%Y%m%d')}.log"
-    
+
     # 创建文件处理器
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
-    
+
     # 设置格式
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
     file_handler.setFormatter(formatter)
-    
+
     # 配置根日志记录器
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
     root_logger.addHandler(file_handler)
-    
+
     # 添加空处理器到控制台，避免日志输出到控制台
     console_handler = logging.StreamHandler(open(os.devnull, "w"))
     console_handler.setLevel(logging.CRITICAL)
     root_logger.addHandler(console_handler)
-    
+
     return log_file
 
 
@@ -65,17 +65,19 @@ class AgentCLI:
 
     def __init__(self):
         # 自定义主题配色 - 使用更优雅的配色方案
-        custom_theme = Theme({
-            "info": "cyan",
-            "warning": "yellow",
-            "error": "red",
-            "success": "green",
-            "prompt": "bright_blue",
-            "command": "bright_magenta",
-            "dim": "dim white",
-            "tool": "bright_cyan",
-            "bot": "bright_green",
-        })
+        custom_theme = Theme(
+            {
+                "info": "cyan",
+                "warning": "yellow",
+                "error": "red",
+                "success": "green",
+                "prompt": "bright_blue",
+                "command": "bright_magenta",
+                "dim": "dim white",
+                "tool": "bright_cyan",
+                "bot": "bright_green",
+            }
+        )
         self.console = Console(theme=custom_theme)
         self.agent: OpenBotExecutor | None = None
         self.running = False
@@ -85,10 +87,12 @@ class AgentCLI:
             auto_suggest=AutoSuggestFromHistory(),
         )
         # 使用更优雅的配色方案
-        self.style = Style.from_dict({
-            "prompt": "#5f87ff bold",      # 柔和的蓝色
-            "input": "#e4e4e4",             # 浅灰色输入
-        })
+        self.style = Style.from_dict(
+            {
+                "prompt": "#5f87ff bold",  # 柔和的蓝色
+                "input": "#e4e4e4",  # 浅灰色输入
+            }
+        )
         self.prompt = "openbot> "
         self.channel_id = "cli_console"
         self._current_response_started = False
@@ -179,8 +183,13 @@ class AgentCLI:
         table.add_column("组件", style="bright_cyan", width=20)
         table.add_column("状态", style="white")
 
-        agent_status = "[success]运行中[/success]" if self.agent else "[warning]未初始化[/warning]"
-        cli_status = "[success]运行中[/success]" if self.running else "[dim]已停止[/dim]"
+        agent_status = (
+            "[success]运行中[/success]" if self.agent else "[warning]未初始化[/warning]"
+        )
+        cli_status = (
+            "[success]运行中[/success]" if self.running else "[dim]已停止[/dim]"
+        )
+        # workspace 现在已经是绝对路径
         workspace = self.agent._agent_config.workspace if self.agent else "N/A"
 
         table.add_row("Agent", agent_status)
@@ -210,7 +219,9 @@ class AgentCLI:
             if content.startswith("CallTools [") and content.endswith("]"):
                 tool_result = content[11:-1]  # 提取方括号内的内容
                 # 限制显示长度，保持在一行内
-                display_result = tool_result[:60] + "..." if len(tool_result) > 60 else tool_result
+                display_result = (
+                    tool_result[:60] + "..." if len(tool_result) > 60 else tool_result
+                )
                 self.console.print(f"[tool]🛠️  CallTools [{display_result}][/tool]")
             elif content:
                 # 限制显示长度
@@ -218,8 +229,20 @@ class AgentCLI:
                 self.console.print(f"[tool]🛠️  调用工具: {display_content}[/tool]")
         elif step.endswith(".before_agent") or step.endswith(".after_model"):
             # 中间件处理步骤 - 简化显示，跳过不重要的
-            middleware_name = step.replace(".before_agent", "").replace(".after_model", "")
-            if any(skip in step for skip in ["TodoList", "PatchToolCalls", "Filesystem", "Summarization", "Skills", "Memory"]):
+            middleware_name = step.replace(".before_agent", "").replace(
+                ".after_model", ""
+            )
+            if any(
+                skip in step
+                for skip in [
+                    "TodoList",
+                    "PatchToolCalls",
+                    "Filesystem",
+                    "Summarization",
+                    "Skills",
+                    "Memory",
+                ]
+            ):
                 # 跳过这些中间件的显示
                 pass
             else:
@@ -253,7 +276,9 @@ class AgentCLI:
 
         # 如果未初始化，自动初始化
         if not self.agent.is_initialized:
-            with self.console.status("[info]正在初始化 Agent...[/info]", spinner="dots"):
+            with self.console.status(
+                "[info]正在初始化 Agent...[/info]", spinner="dots"
+            ):
                 try:
                     await self.agent.init_agent()
                 except Exception as e:
@@ -380,10 +405,14 @@ def main():
     log_file = setup_logging()
 
     # 创建临时 console 用于启动消息
-    temp_console = Console(theme=Theme({
-        "warning": "yellow",
-        "dim": "dim white",
-    }))
+    temp_console = Console(
+        theme=Theme(
+            {
+                "warning": "yellow",
+                "dim": "dim white",
+            }
+        )
+    )
 
     # 检查配置
     config_path = os.environ.get("OPENBOT_CONFIG_PATH", "config/config.json")

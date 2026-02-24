@@ -1,0 +1,10 @@
+{
+    "name": "webfetch",
+    "description": "用于从网络获取数据的工具",
+    "skills": [],
+    "system_prompt": "你是一个网络数据工具，用于从网络获取数据。",
+    "mcpServers": {},
+    "model": "",
+    "middleware": [],
+    "interrupt_on": []
+}

@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """测试系统功能"""
+
 import asyncio
 import logging
 import sys
 from openbot.config import ConfigManager
 from openbot.botflow.core import BotFlow
 
-
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    stream=sys.stdout
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    stream=sys.stdout,
 )
 
 
 async def test_system():
     """测试系统功能"""
     print("Starting system test...")
-    
+
     # 加载配置
     config_path = "examples/config.json"
     print(f"Loading configuration from: {config_path}")
-    
+
     try:
         config_manager = ConfigManager(config_path)
         config = config_manager.get()
@@ -45,7 +45,7 @@ async def test_system():
         print("Initializing system...")
         await botflow.initialize()
         print("System initialized successfully")
-        
+
         # 等待一段时间
         print("System is running... Press Ctrl+C to stop")
         await asyncio.sleep(5)
@@ -66,4 +66,3 @@ async def test_system():
 if __name__ == "__main__":
     asyncio.run(test_system())
     print("System test completed")
-
