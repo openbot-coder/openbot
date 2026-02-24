@@ -1,9 +1,11 @@
-"""BotFlow 核心应用"""
+"""BotFlow 核心应用 - FastAPI"""
 import logging
 import time
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional, Callable, Any
+
+from fastapi import FastAPI, WebSocket, Request
 
 from .config import BotFlowConfig, ChannelConfig
 from .database import DatabaseManager, ChatMessage
@@ -13,14 +15,16 @@ from .task import Task, TaskManager
 logger = logging.getLogger(__name__)
 
 
-class BotFlow:
-    """BotFlow 核心类"""
+class BotFlow(FastAPI):
+    """BotFlow 核心类 - 继承 FastAPI"""
     
     def __init__(
         self,
         config: BotFlowConfig,
         agent: Optional[Any] = None,
     ):
+        super().__init__(title="BotFlow", version="0.3.0")
+        
         self.config = config
         self.agent = agent
         
@@ -34,25 +38,37 @@ class BotFlow:
         # 消息处理器
         self._message_handler: Optional[Callable] = None
         
-        self._initialized = False
+        # 注册路由
+        self._register_routes()
+        
+        # 生命周期事件
+        self.add_event_handler("startup", self._on_startup)
+        self.add_event_handler("shutdown", self._on_shutdown)
     
-    async def initialize(self):
-        """初始化 BotFlow"""
-        if self._initialized:
-            return
-            
+    def _register_routes(self):
+        """注册路由"""
+        @self.get("/")
+        async def root():
+            return {"name": "BotFlow", "version": "0.3.0"}
+        
+        @self.get("/health")
+        async def health():
+            return {
+                "status": "healthy",
+                "task_count": len(self.task_manager.list_tasks())
+            }
+    
+    async def _on_startup(self):
+        """启动事件"""
         await self.db.initialize()
         await self.task_manager.start()
-        
-        self._initialized = True
-        logger.info("BotFlow initialized")
+        logger.info("BotFlow started")
     
-    async def shutdown(self):
-        """关闭 BotFlow"""
+    async def _on_shutdown(self):
+        """关闭事件"""
         for channel in self.channels.values():
             if hasattr(channel, 'stop'):
                 await channel.stop()
-        
         self.task_manager.close()
         logger.info("BotFlow shutdown")
     
@@ -115,17 +131,3 @@ class BotFlow:
         if hasattr(channel, 'set_message_handler'):
             channel.set_message_handler(self.handle_message)
         logger.info(f"Registered channel: {name}")
-    
-    async def start(self):
-        """启动 BotFlow"""
-        await self.initialize()
-        
-        # 启动所有通道
-        for name, channel in self.channels.items():
-            if hasattr(channel, 'start'):
-                await channel.start()
-                logger.info(f"Started channel: {name}")
-    
-    async def stop(self):
-        """停止 BotFlow"""
-        await self.shutdown()
