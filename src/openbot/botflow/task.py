@@ -1,118 +1,77 @@
-import logging
+"""BotFlow 任务模块 - 统一的任务系统"""
 import asyncio
-import datetime
+import uuid
+import logging
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Union
-from openbot.botflow.trigger import Trigger, once
+from datetime import datetime
+from enum import Enum
+from heapq import heappush, heappop
+from typing import Any, Callable, Dict, List, Optional
+
+# 导入 Trigger（从 trigger.py）
+from .trigger import Trigger
 
 
 class Task:
-    def __init__(self, func: callable, *args: Any, **kwargs: Any) -> None:
+    """任务类（函数式设计）"""
+    
+    def __init__(self, name: str, func: Callable, *args: Any, **kwargs: Any) -> None:
+        self.id = str(uuid.uuid4())
+        self.name = name
+        self.trigger = None
+        self.trigger_dt = None  # 添加 trigger_dt 属性
+        self.created_at = datetime.now()
         self.func = func
-        self.args = args if args is not None else []
-        self.kwargs = kwargs if kwargs is not None else {}
+        self.args = args
+        self.kwargs = kwargs
+    
+    def set_trigger(self, trigger: Trigger):
+        self.trigger = trigger
+        self.trigger_dt = self.trigger.next()
 
-    async def run(self) -> None:
-        """异步运行任务"""
-        if inspect.iscoroutinefunction(self.func):
-            return await self.func(*self.args, **self.kwargs)
-        else:
-            return await asyncio.to_thread(self.func, *self.args, **self.kwargs)
+    async def run(self):
+        """执行任务"""
+        while self.trigger_dt:
+            now = datetime.now()
+            if self.trigger_dt > now:
+                await asyncio.sleep((self.trigger_dt - now).total_seconds())
+            
+            # 执行任务（无论是否等待，都执行）
+            if inspect.iscoroutinefunction(self.func):
+                await self.func(*self.args, **self.kwargs)
+            else:
+                await asyncio.to_thread(self.func, *self.args, **self.kwargs)
+            
+            # 获取下次触发时间
+            if self.trigger:
+                self.trigger_dt = self.trigger.next()
+            else:
+                self.trigger_dt = None
 
 
 class TaskManager:
-    def __init__(self, stop_event: asyncio.Event) -> None:
-        self._task_queue = asyncio.PriorityQueue()
-        self._new_task_condition = asyncio.Condition()
-        self.stop_event = stop_event
-
-    async def submit_task(self, task: Task, trigger: Trigger = None) -> None:
-        """提交任务"""
-        if trigger is None:
-            trigger = once(datetime.datetime.now())
-
-        async with self._new_task_condition:
-            try:
-                next(trigger)
-                self._task_queue.put_nowait((trigger, task))
-                self._new_task_condition.notify()
-            except StopIteration:
-                pass
-
-    async def get_task(self) -> Task:
-        """获取任务"""
-        async with self._new_task_condition:
-            try:
-                while True:
-                    if self._task_queue.empty():
-                        await self._new_task_condition.wait()
-                    else:
-                        # 使用安全的方式获取队列元素
-                        # 注意：这里仍然需要访问内部属性，但添加了异常处理
-                        try:
-                            # 获取队列中的第一个元素
-                            tasks = list(self._task_queue._queue)
-                            if not tasks:
-                                continue
-                            trigger, task = tasks[0]
-                            if trigger.trigger_dt <= datetime.datetime.now():
-                                break
-
-                            wait_time = max(
-                                0,
-                                trigger.trigger_dt.timestamp()
-                                - datetime.datetime.now().timestamp(),
-                            )
-                            await asyncio.wait_for(
-                                self._new_task_condition.wait(),
-                                timeout=wait_time,
-                            )
-                        except asyncio.TimeoutError:
-                            continue
-                        except Exception as e:
-                            logging.error(f"Error in task queue: {e}")
-                            continue
-
-                self._task_queue.get_nowait()
-                try:
-                    next(trigger)
-                    self._task_queue.put_nowait((trigger, task))
-                    self._new_task_condition.notify()
-                except StopIteration:
-                    pass
-                return task
-            except asyncio.CancelledError:
-                pass
-
-    async def run(self) -> None:
-        """运行任务队列"""
-        while not self.stop_event.is_set():
-            try:
-                task = await self.get_task()
-                await task.run()
-            except asyncio.CancelledError:
-                break
-            except asyncio.TimeoutError:
-                logging.error(f"Timeout running task: {task.func.__name__}")
-            except Exception as e:
-                logging.error(f"Error running task: {task.func.__name__} error: {e}")
-
-
-if __name__ == "__main__":
-    from openbot.botflow.trigger import every
-    from vxutils import loggerConfig
-
-    loggerConfig()
-
-    def print_hello():
-        logging.info("Hello, World!")
-
-    async def main():
-        stop_event = asyncio.Event()
-        task_manager = TaskManager(stop_event)
-        task = Task(print_hello)
-        logging.info("Submitting task: print_hello")
-        await task_manager.submit_task(task, every(interval=3))
-        await task_manager.run()
-
-    asyncio.run(main())
+    """任务管理器"""
+    
+    def __init__(self):
+        self._tasks: List[Task] = []
+        self._coroutines: List[asyncio.Task] = []
+        self._running = False
+   
+    async def start(self):
+        self._running = True
+   
+    def submit(self, task: Task):
+        self._tasks.append(task)
+        self._coroutines.append(asyncio.create_task(task.run()))
+    
+    def list_tasks(self):
+        return self._tasks
+    
+    def list_coroutines(self):
+        return self._coroutines
+    
+    def close(self):
+        for coroutine in self._coroutines:
+            coroutine.cancel()
+        self._coroutines.clear()
+        self._tasks.clear()
