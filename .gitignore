@@ -146,7 +146,8 @@ venv.bak/
 
 # Logs
 logs/
-
+memory/
+config/
 # Spyder project settings
 .spyderproject
 .spyproject

@@ -40,7 +40,6 @@ from argparse import ArgumentParser
 from pydantic import Field
 from vxutils import to_datetime, VXDataModel, VXThreadPoolExecutor, loggerConfig
 
-
 # ==========================================
 # Part 1: Configuration (from config.py)
 # ==========================================

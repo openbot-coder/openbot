@@ -1,433 +1,430 @@
-"""智能代理核心类"""
-
+import asyncio
 import os
 import logging
-import asyncio
-
-import inspect
 from pathlib import Path
-from typing import Dict, Literal, List, Any, Callable, Optional
-from langchain_core.messages import HumanMessage
-from langchain.agents.middleware import (
-    wrap_model_call,
-    ModelRequest,
-    ModelResponse,
-    AgentMiddleware,
-    TodoListMiddleware,
-)
-from langchain.chat_models import BaseChatModel
 from langchain.agents import create_agent
+from langgraph.graph.state import CompiledStateGraph
+from langchain.agents.middleware import TodoListMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 
 from langgraph.checkpoint.memory import InMemorySaver
-
 from deepagents.backends import FilesystemBackend
-from deepagents.middleware import (
-    SkillsMiddleware,
-    MemoryMiddleware,
-    SummarizationMiddleware,
-)
+from deepagents.middleware.skills import SkillsMiddleware
+from deepagents.middleware.memory import MemoryMiddleware
 from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from deepagents.middleware.filesystem import FilesystemMiddleware
-
-from openbot.config import AgentConfig
-from openbot.channels.base import ChatMessage, ContentType
-from openbot.agents.tools import ToolsManager
-from openbot.agents.system_prompt import DEFAULT_SYSTEM_PROMPT_V2
-from openbot.agents.models import (
-    ModelManager,
-    get_current_time,
-    remove_file,
-    run_bash_command,
+from deepagents.middleware.summarization import SummarizationMiddleware
+from deepagents import create_deep_agent
+from openbot.agents.model import init_modelselector
+from openbot.agents.tools.mcptool import init_mcp_middleware
+from openbot.common.config import AgentConfig, ConfigManager
+from openbot.common.datamodel import (
+    AnswerDetail,
+    Question,
+    Answer,
+    ContentType,
+    AnswerFuture,
 )
+from pydantic import BaseModel
+from typing import TypedDict
 
 
-def get_summarization_defaults(model: BaseChatModel) -> Dict[str, Any]:
-    """获取总结中间件默认参数"""
-
-    has_profile = (
-        model.profile is not None
-        and isinstance(model.profile, dict)
-        and "max_input_tokens" in model.profile
-        and isinstance(model.profile["max_input_tokens"], int)
-    )
-
-    if has_profile:
-        return {
-            "trigger": ("fraction", 0.85),
-            "keep": ("fraction", 0.10),
-            "truncate_args_settings": {
-                "trigger": ("fraction", 0.85),
-                "keep": ("fraction", 0.10),
-            },
-        }
-    return {
-        "trigger": ("tokens", 170000),
-        "keep": ("messages", 6),
-        "truncate_args_settings": {
-            "trigger": ("messages", 20),
-            "keep": ("messages", 20),
-        },
-    }
+class OpenBotContext(TypedDict):
+    model: str = ""
 
 
-class OpenBotExecutor:
-    """OpenBot 智能体执行类 - 支持懒加载"""
+class OpenBotAgent:
+    """OpenBot智能体"""
 
-    def __init__(self, model_configs: Dict[str, Any], agent_config: AgentConfig):
-        self._agent_config = agent_config
-        self._model_configs = model_configs
-        self._model_manager = ModelManager(self._model_configs)
-        self._tools_manager = ToolsManager()
-        # 移除这里的同步加载，改为懒加载
-        # self._tools_manager.load_tools_from_config(self._agent_config.mcp_config)
+    def __init__(self, config: AgentConfig) -> None:
+        self._workspace = config.workspace
+        self._config = config
+        self._system_prompt = ""
+        self._mcp_middleware = None
+        self._default_model = config.default_model
+        self._model_selector = None
+        self._message_queue = asyncio.Queue()
         self._agent = None
-        self._initialized = False
-        self._initializing = False
-        self._init_error: Optional[Exception] = None
+        self._running = False
+        self._worker_task = None
+        self._ready_event = asyncio.Event()
+        os.environ["OPENBOT_WORKSPACE"] = self._workspace
 
-    @property
-    def is_initialized(self) -> bool:
-        """检查是否已初始化"""
-        return self._initialized
+        # 初始化系统提示
+        self._initialize_system_prompt()
 
-    @property
-    def is_initializing(self) -> bool:
-        """检查是否正在初始化"""
-        return self._initializing
-
-    @property
-    def init_error(self) -> Optional[Exception]:
-        """获取初始化错误"""
-        return self._init_error
-
-    async def init_agent(self) -> None:
-        """初始化智能体 - 懒加载方式"""
-        if self._initialized:
-            return
-
-        if self._initializing:
-            # 等待初始化完成
-            while self._initializing:
-                await asyncio.sleep(0.1)
-            return
-
-        self._initializing = True
-        self._init_error = None
-
+    def _initialize_system_prompt(self) -> None:
+        """初始化系统提示"""
+        system_prompt_path = Path(__file__).parent / "prompts/system_prompt.md"
         try:
-            await self._do_init()
-            self._initialized = True
-        except Exception as e:
-            self._init_error = e
-            logging.error(f"Agent initialization failed: {e}", exc_info=True)
-            raise
-        finally:
-            self._initializing = False
-
-    async def _do_init(self) -> None:
-        """实际初始化逻辑"""
-        # 获取默认模型
-        try:
-            futures = [
-                asyncio.to_thread(self._model_manager.add_model, name, model_config)
-                for name, model_config in self._model_configs.items()
-            ]
-            await asyncio.gather(*futures)
-            model = self._model_manager.get_model(self._agent_config.default_model)
-            if model is None:
-                raise ValueError(
-                    f"Model {self._agent_config.default_model} not found in model_configs"
+            with open(system_prompt_path, "r", encoding="utf-8") as f:
+                system_prompt = f.read()
+            self._system_prompt = system_prompt.format(
+                workspace=self._workspace
+            ).strip()
+            if self._config.system_prompt:
+                self._system_prompt = (
+                    self._system_prompt + "\n\n" + self._config.system_prompt.strip()
                 )
-
-            logging.info(f"☑️ Using model: {self._agent_config.default_model}")
         except Exception as e:
-            logging.error(
-                f"❌ Failed to get model: {self._agent_config.default_model}, {str(e)}"
-            )
-            raise e
+            logging.error(f"Error initializing system prompt: {e}")
 
+    async def init_agent(self) -> CompiledStateGraph:
+        """初始化智能体"""
         try:
-            # 初始化工具管理器
-            self._tools_manager.load_tools_from_config(self._agent_config.mcp_config)
-            tools = await self._tools_manager.get_tools()
-            tools.extend([get_current_time, remove_file, run_bash_command])
-            logging.info(f"☑️ Using tools: {len(tools)}")
-        except Exception as e:
-            logging.error(
-                f"❌ Failed to load tools from config: {self._agent_config.mcp_config}, {str(e)}"
+            self._mcp_middleware, self._model_selector = await asyncio.gather(
+                init_mcp_middleware(self._config.mcp_config),
+                init_modelselector(self._config.model_configs, self._default_model),
             )
-            raise e
+            if not self._model_selector.list_models():
+                raise ValueError("模型选择器未配置任何模型")
 
-        try:
-            # 设置 OPENBOT_WORKSPACE 环境变量，供工具使用
-            os.environ["OPENBOT_WORKSPACE"] = self._agent_config.workspace
-
-            # 初始化backend - workspace 现在已经是绝对路径
             backend = FilesystemBackend(
-                root_dir=self._agent_config.workspace,
+                root_dir=self._workspace,
                 virtual_mode=False,
             )
-            logging.info(
-                f"☑️ Using backend({self._agent_config.workspace}):  {backend}"
-            )
-        except Exception as e:
-            logging.error(
-                f"❌ Failed to create backend: {self._agent_config.workspace}, {str(e)}"
-            )
-            raise e
 
-        try:
-            summarization_defaults = get_summarization_defaults(model)
-            gp_middleware: list[AgentMiddleware[Any, Any, Any]] = [
-                TodoListMiddleware(),
-                FilesystemMiddleware(backend=backend),
-                SummarizationMiddleware(
-                    model=model,
-                    backend=backend,
-                    trigger=summarization_defaults["trigger"],
-                    keep=summarization_defaults["keep"],
-                    trim_tokens_to_summarize=None,
-                    truncate_args_settings=summarization_defaults[
-                        "truncate_args_settings"
-                    ],
-                ),
-                SkillsMiddleware(backend=backend, sources=self._agent_config.skills),
-                AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
+            middlewares = [
                 PatchToolCallsMiddleware(),
-                MemoryMiddleware(
+                TodoListMiddleware(),
+                # FilesystemMiddleware(memory_backend=backend),
+                self._mcp_middleware,
+                self._model_selector,
+                # *SkillsMiddleware(
+                # *    backend=backend,
+                # *    sources=[
+                # *        str((Path(self._workspace) / ".openbot/skills").absolute())
+                # *    ],
+                # *),
+                SummarizationMiddleware(
+                    model=self._model_selector.get_model(self._default_model),
+                    max_tokens_before_summary=170000,
+                    messages_to_keep=6,
                     backend=backend,
-                    sources=[
-                        "memory/USER.MD",
-                        "memory/AGENT.md",
-                        "memory/progress.md",
-                        "memory/memory.md",
-                    ],
                 ),
+                AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
             ]
-        except Exception as e:
-            logging.error(f"❌ Failed to create gp middleware: {str(e)}")
-            raise e
+            # middlewares.append(PatchToolCallsMiddleware())
+            model = self._model_selector.get_model(self._default_model)
 
-        try:
             self._agent = create_agent(
                 model=model,
-                tools=tools,
-                middleware=gp_middleware,
-                system_prompt=DEFAULT_SYSTEM_PROMPT_V2.format(
-                    workspace=self._agent_config.workspace
-                ),
+                tools=[],
+                middleware=middlewares,
                 checkpointer=InMemorySaver(),
-                debug=self._agent_config.debug,
+                name="OpenBotAgent",
             )
+
+            self._ready_event.set()
         except Exception as e:
-            logging.error(f"❌ Failed to create agent: {str(e)}")
-            raise e
+            logging.error(f"Error initializing agent: {e}", exc_info=True)
+            raise
 
-    async def ensure_initialized(self) -> None:
-        """确保已初始化，如未初始化则自动初始化"""
-        if not self._initialized:
-            await self.init_agent()
-
-    @property
-    def model_manager(self) -> ModelManager:
-        """获取模型管理器"""
-        return self._model_manager
-
-    @property
-    def agent(self) -> Any:
-        """获取智能代理"""
         return self._agent
 
-    def chat(
-        self,
-        message: ChatMessage,
-        streaming_callback: Callable[[ChatMessage], None] | None = None,
-    ) -> List[ChatMessage]:
-        """与用户进行对话(同步) - 自动初始化"""
-        # 同步方式需要运行异步初始化
-        if not self._initialized:
-            asyncio.run(self.ensure_initialized())
+    async def start(self):
+        """启动智能体"""
+        if self._running:
+            return
 
-        message.content = message.content.strip()
-        reply_messages = []
-        for chunk in self.agent.stream(
-            {"messages": [{"role": message.role, "content": message.content}]},
-            config={"configurable": {"thread_id": message.channel_id}},
-            stream_mode="updates",
-            debug=self._agent_config.debug,
-        ):
-            chunk_reply_messages = self._handle_message_chunk(
-                chunk, message, streaming_callback
-            )
-            if chunk_reply_messages:
-                reply_messages.extend(chunk_reply_messages)
-        return reply_messages
+        self._running = True
+        asyncio.create_task(self.init_agent())
+        self._worker_task = asyncio.create_task(self.worker())
 
-    def _handle_message_chunk(
-        self,
-        chunk: dict,
-        message: ChatMessage,
-        streaming_callback: Callable[[ChatMessage], None] | None = None,
-    ) -> List[ChatMessage]:
-        """处理消息块"""
-        reply_messages = []
-        for step, data in chunk.items():
+    async def stop(self):
+        """停止智能体"""
+        if not self._running:
+            return
 
-            if step in ["model", "tools"] and "messages" in data:
-                raw_reply_message = data["messages"][-1]
-                if isinstance(raw_reply_message, HumanMessage):
-                    continue
+        self._ready_event.clear()
+        if self._worker_task:
+            self._worker_task.cancel()
+        self._agent = None
+        self._worker_task = None
+        self._running = False
+        logging.info("智能体已停止")
 
-                # 对于工具调用，添加更清晰的标识
-                content = raw_reply_message.content
-                if step == "tools" and content:
-                    content = f"CallTools [{content}]"
+    def switch_model(self, model_name: str) -> bool:
+        """切换模型
 
-                reply_message = ChatMessage(
-                    channel_id=message.channel_id,
-                    msg_id=raw_reply_message.id,
-                    content=content,
-                    role="bot",
-                    content_type=ContentType.TEXT,
-                    metadata={"step": step},
-                )
-                if callable(streaming_callback):
-                    streaming_callback(reply_message)
-                reply_messages.append(reply_message)
+        Args:
+            model_name: 模型名称
 
-            else:
-                # 只显示重要的中间步骤
-                if not any(
-                    skip in step
-                    for skip in [
-                        "TodoList",
-                        "PatchToolCalls",
-                        "Filesystem",
-                        "Summarization",
-                    ]
-                ):
-                    stepmessage = ChatMessage(
-                        channel_id=message.channel_id,
-                        content=f"processing step: {step}...",
-                        role="bot",
-                        content_type=ContentType.TEXT,
-                        metadata={"step": step},
-                    )
-                    if callable(streaming_callback):
-                        streaming_callback(stepmessage)
-        return reply_messages
+        Returns:
+            是否切换成功
+        """
+        if not self._model_selector:
+            return False
 
-    async def achat(
-        self,
-        message: ChatMessage,
-        streaming_callback: Callable[[ChatMessage], None] | None = None,
-        max_retries: int = 3,
-    ) -> List[ChatMessage]:
-        """与用户进行对话 - 自动初始化，支持工具调用重试"""
-        # 确保已初始化
-        await self.ensure_initialized()
+        if model_name not in self._model_selector.list_models():
+            return False
 
-        message.content = message.content.strip()
-        reply_messages = []
+        self._default_model = model_name
+        self._model_selector.set_default_model(model_name)
+        return True
 
-        last_exception = None
-        delay = 1.0
+    def list_models(self) -> list:
+        """列出所有可用模型
 
-        for attempt in range(max_retries + 1):
+        Returns:
+            模型名称列表
+        """
+        if not self._model_selector:
+            return []
+        return list(self._model_selector.list_models().keys())
+
+    async def ask(self, question: Question) -> AnswerFuture:
+        """智能体回答问题"""
+        if self._agent is None:
+            await self._ready_event.wait()
+
+        answer_future = AnswerFuture()
+        self._message_queue.put_nowait((question, answer_future))
+        return answer_future
+
+    async def worker(self):
+        """智能体工作循环"""
+        logging.info("智能体工作循环启动")
+
+        while self._running:
             try:
-                async for chunk in self.agent.astream(
-                    {"messages": [{"role": message.role, "content": message.content}]},
-                    config={"configurable": {"thread_id": message.channel_id}},
+                question, answer_future = await self._message_queue.get()
+                if self._agent is None:
+                    await self._ready_event.wait()
+
+                logging.info(f"智能体收到问题: {question.content}")
+
+                final_message = None
+                async for chunk in self._agent.astream(
+                    {"messages": [{"role": "user", "content": question.content}]},
+                    context=None,  # 使用 None 代替 OpenBotContext 对象
                     stream_mode="updates",
-                    debug=self._agent_config.debug,
+                    config={
+                        "configurable": {
+                            "thread_id": question.channel_id,
+                            "model": self._default_model,
+                        }
+                    },
                 ):
-                    chunk_reply_messages = self._handle_message_chunk(
-                        chunk, message, streaming_callback
-                    )
-                    if chunk_reply_messages:
-                        reply_messages.extend(chunk_reply_messages)
+                    try:
+                        for step, chunk_data in chunk.items():
+                            if step == "model":
+                                message = chunk_data["messages"][-1]
+                                final_message = message
+                                await self._process_model_step(
+                                    question, answer_future, message
+                                )
+                            elif step == "tools":
+                                function_call = chunk_data["messages"][-1]
+                                await self._process_tools_step(
+                                    question, answer_future, function_call
+                                )
+                            elif step.split(".")[1] in [
+                                "before_model",
+                                "before_agent",
+                                "after_agent",
+                                "after_model",
+                            ]:
+                                if chunk_data is not None:
+                                    await self._process_middleware_step(
+                                        question, answer_future, step, chunk_data
+                                    )
+                            else:
+                                # 处理所有其他步骤，包括思考过程
+                                await self._process_unknown_step(
+                                    question, answer_future, step, chunk_data
+                                )
+                    except Exception as e:
+                        logging.error(f"Error processing chunk: {e}", exc_info=True)
 
-                # 成功完成，返回结果
-                return reply_messages
-
-            except Exception as e:
-                last_exception = e
-                error_msg = str(e).lower()
-
-                # 检查是否是工具调用错误
-                is_tool_error = any(
-                    err in error_msg
-                    for err in [
-                        "error executing tool",
-                        "tool",
-                        "fetch_content",
-                        "httpx",
-                    ]
-                )
-
-                if is_tool_error and attempt < max_retries:
-                    logging.warning(
-                        f"Tool call failed (attempt {attempt + 1}/{max_retries + 1}): {e}. "
-                        f"Retrying in {delay:.1f}s..."
-                    )
-                    # 通知用户正在重试
-                    if callable(streaming_callback):
-                        retry_message = ChatMessage(
-                            channel_id=message.channel_id,
-                            content=f"工具调用失败，正在重试 ({attempt + 1}/{max_retries})...",
-                            role="bot",
-                            content_type=ContentType.TEXT,
-                            metadata={"step": "retry"},
+                # 确保有消息可用
+                if final_message:
+                    answer_future.set_result(
+                        Answer(
+                            question_id=question.question_id,
+                            user_id=question.user_id,
+                            channel_id=question.channel_id,
+                            content=final_message.content,
                         )
-                        streaming_callback(retry_message)
-
-                    await asyncio.sleep(delay)
-                    delay *= 2.0  # 指数退避
+                    )
                 else:
-                    # 非工具错误或已达到最大重试次数
-                    logging.error(f"Chat failed after {attempt + 1} attempts: {e}")
-                    raise
+                    # 如果没有模型消息，创建一个默认的回答
+                    answer_future.set_result(
+                        Answer(
+                            question_id=question.question_id,
+                            user_id=question.user_id,
+                            channel_id=question.channel_id,
+                            content="",
+                        )
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logging.error(f"Error in worker loop: {e}", exc_info=True)
 
-        # 所有重试都失败了
-        raise last_exception
+    async def _process_model_step(
+        self, question: Question, answer_future: AnswerFuture, message: dict
+    ) -> None:
+        """处理模型步骤"""
+        try:
+            answer_detail = AnswerDetail(
+                step="model",
+                method="model",
+                content=message.content,
+                content_type=ContentType.TEXT,
+                user_id=question.user_id,
+                channel_id=question.channel_id,
+                metadata={
+                    "chunk_data": message,
+                },
+            )
+            await answer_future.set_detail_result(answer_detail)
+        except Exception as e:
+            logging.error(f"Error processing model step: {e}", exc_info=True)
+
+    async def _process_middleware_step(
+        self,
+        question: Question,
+        answer_future: AnswerFuture,
+        step: str,
+        chunk_data: dict,
+    ) -> None:
+        """处理中间件步骤"""
+        try:
+            method, step = step.split(".")
+            answer_detail = AnswerDetail(
+                step=step,
+                method=method,
+                content=method,
+                content_type=ContentType.TEXT,
+                user_id=question.user_id,
+                channel_id=question.channel_id,
+                metadata={
+                    "chunk_data": chunk_data,
+                },
+            )
+            await answer_future.set_detail_result(answer_detail)
+        except Exception as e:
+            logging.error(f"Error processing middleware step: {e}", exc_info=True)
+
+    async def _process_tools_step(
+        self, question: Question, answer_future: AnswerFuture, function_call: dict
+    ) -> None:
+        """处理工具步骤"""
+        try:
+            # 安全获取 arguments
+            arguments = function_call.content[-1] if function_call.content else "{}"
+            if "type" in arguments:
+                content = arguments.get(arguments["type"], "")
+            content = str(arguments)
+
+            answer_detail = AnswerDetail(
+                step="tools",
+                method=function_call.name,
+                content=content,
+                content_type=ContentType.TEXT,
+                user_id=question.user_id,
+                channel_id=question.channel_id,
+                metadata={
+                    "chunk_data": function_call,
+                },
+            )
+            await answer_future.set_detail_result(answer_detail)
+        except Exception as e:
+            logging.error(f"Error processing tools step: {e}", exc_info=True)
+
+    async def _process_unknown_step(
+        self,
+        question: Question,
+        answer_future: AnswerFuture,
+        step: str,
+        chunk_data: dict,
+    ) -> None:
+        """处理未知步骤"""
+        logging.error(f"Unknown step: {step} -- {chunk_data}")
+        try:
+            # 确保 content 是字符串类型
+            content_str = str(chunk_data)
+            answer_detail = AnswerDetail(
+                step=step,
+                method="unknown",
+                content=content_str,
+                content_type=ContentType.TEXT,
+                user_id=question.user_id,
+                channel_id=question.channel_id,
+                metadata={
+                    "chunk_data": chunk_data,
+                },
+            )
+            await answer_future.set_detail_result(answer_detail)
+        except Exception as e:
+            logging.error(f"Error creating AnswerDetail: {e}", exc_info=True)
+            # 创建一个简单的 AnswerDetail 来避免流程中断
+            error_detail = AnswerDetail(
+                step=step,
+                method="error",
+                content=f"Error processing step: {str(e)}",
+                content_type=ContentType.TEXT,
+                user_id=question.user_id,
+                channel_id=question.channel_id,
+            )
+            await answer_future.set_detail_result(error_detail)
+
+
+async def main():
+    """主函数"""
+    try:
+        import argparse
+        import os
+
+        parser = argparse.ArgumentParser(description="OpenBot智能体")
+        parser.add_argument(
+            "--config",
+            type=str,
+            default=os.path.join(
+                os.path.dirname(__file__), "../../examples/config.json"
+            ),
+            help="配置文件路径",
+        )
+        args = parser.parse_args()
+
+        config_manager = ConfigManager(args.config)
+        config = config_manager.config
+        agent = OpenBotAgent(config.agent_config)
+        await agent.start()
+
+        logging.info("OpenBot 启动完成，输入 'exit' 退出")
+        while True:
+            try:
+                prompt = await asyncio.to_thread(input, "openbot > ")
+                if prompt == "exit":
+                    break
+                prompt = prompt.strip()
+                if not prompt:
+                    continue
+                question = Question(content=prompt)
+                answer_future: AnswerFuture = await agent.ask(question)
+                async for answer_detail in answer_future.more_details():
+                    print(f"{answer_detail.step}: {answer_detail.content}")
+                answer = answer_future.result()
+                print("+" * 60)
+                print("question:", question.content)
+                print("answer:", answer.content)
+                print("+" * 60)
+            except KeyboardInterrupt:
+                logging.info("收到中断信号，退出...")
+                break
+            except Exception as e:
+                logging.error(f"Error in main loop: {e}", exc_info=True)
+
+    finally:
+        if "agent" in locals():
+            await agent.stop()
 
 
 if __name__ == "__main__":
     import asyncio
-    import os
-    from openbot.config import ConfigManager
     from vxutils import loggerConfig
 
-    loggerConfig(level=logging.INFO)
-    config_path = os.environ.get("OPENBOT_CONFIG_PATH", "config/config.json")
-    config_manager = ConfigManager(config_path)
-    config = config_manager.config
-    agent_config = config.agent_config
-    model_configs = config.model_configs
-    print(model_configs)
-    agent_core = OpenBotExecutor(model_configs, agent_config)
-
-    def on_message(message: ChatMessage) -> ChatMessage | None:
-        step = message.metadata.get("step", "")
-        if step == "model":
-            print(f"bot   > {message.content}")
-        elif step == "tools":
-            print(f"tools > {message.content}")
-        else:
-            print(f"system > {message.content}")
-        return message
-
-    while True:
-        message = input("请输入: ")
-
-        chatmessage = ChatMessage(
-            channel_id="123",
-            content=message,
-            role="user",
-            content_type=ContentType.TEXT,
-        )
-        reply_messages = agent_core.chat(
-            chatmessage,
-            streaming_callback=on_message,
-        )
+    loggerConfig(level=logging.WARNING)
+    asyncio.run(main())

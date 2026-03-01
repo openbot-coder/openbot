@@ -10,16 +10,12 @@ from pydantic_settings import BaseSettings
 class ChannelConfig(BaseSettings):
     """通道配置类"""
 
+    name: str = ""
     enabled: bool = True
-    init_kwargs: dict = Field(default_factory=dict)
+    path: str = ""
+    params: dict = Field(default_factory=dict)
 
-
-class EvolutionConfig(BaseSettings):
-    """进化配置类"""
-
-    enabled: bool = True
-    auto_test: bool = True
-    require_approval: bool = True
+    model_config = {"extra": "allow"}
 
 
 class ModelConfig(BaseSettings):
@@ -36,22 +32,39 @@ class AgentConfig(BaseSettings):
     """智能体配置类"""
 
     name: str = "openbot"
-    workspace: str = "."
     system_prompt: str = "你是一个智能助手，你的任务是回答用户的问题。"
-    skills: List[str] = []
-    memory: List[str] = []
+    model_configs: Dict[str, ModelConfig] = {}
+    skills: List[str] = [".openbot/skills"]
+    memory: List[str] = [".openbot/memory"]
+    mcp_config: str = "mcp.json"
     default_model: str = ""
-    mcp_config: str = "./config/mcp.json"
+    workspace: str = "."
     debug: bool = False
+
+    model_config = {"extra": "allow"}
 
 
 class OpenbotConfig(BaseSettings):
     """Openbot 配置类"""
 
-    model_configs: Dict[str, ModelConfig] = {}
     agent_config: AgentConfig = AgentConfig()
-    channels: dict[str, ChannelConfig] = {"console": ChannelConfig()}
-    evolution: EvolutionConfig = EvolutionConfig()
+    channels: List[ChannelConfig] = Field(
+        default_factory=lambda: [
+            ChannelConfig(
+                name="feishu",
+                enabled=True,
+                path="/feishu/webhook",
+                params={"app_id": "", "app_secret": "", "verification_token": ""},
+            ),
+        ]
+    )
+    host: str = "0.0.0.0"
+    port: int = 8000
+    db_path: str = "data/botflow.db"
+    worker_count: int = 4
+    queue_timeout: float = 30.0
+
+    model_config = {"extra": "allow"}
 
 
 class ConfigManager:
@@ -64,7 +77,7 @@ class ConfigManager:
         if config_path_obj and config_path_obj.parent.name == "config":
             self.config_dir = config_path_obj.parent.parent
         else:
-            self.config_dir = config_path_obj.parent if config_path_obj else Path.cwd()
+            self.config_dir = Path.cwd()
         self.config = self._load_config()
         self._validate_config()
         self._resolve_relative_paths()
@@ -119,25 +132,10 @@ class ConfigManager:
 
     def _validate_config(self) -> None:
         """验证配置完整性"""
-        if not self.config.model_configs:
-            logging.warning("No model configurations provided, using defaults")
-
-        not_valid_models = []
-        for name, config in self.config.model_configs.items():
-            if not config.api_key:
-                logging.warning(f"API key not configured for model {name}")
-                not_valid_models.append(name)
-
-            if not config.model:
-                logging.warning(f"Model name not specified for model {name}")
-                not_valid_models.append(name)
-
-        for model in not_valid_models:
-            del self.config.model_configs[model]
 
     def get_model_configs(self) -> Dict[str, ModelConfig]:
         """获取模型配置"""
-        return self.config.model_configs
+        return self.config.agent_config.model_configs
 
     def _resolve_env_vars(self, config_dict: dict) -> dict:
         """解析配置中的环境变量引用"""

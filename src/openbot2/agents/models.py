@@ -25,6 +25,25 @@ from openbot.agents.system_prompt import DEFAULT_SYSTEM_PROMPT_V2
 from openbot.config import AgentConfig, ModelConfig
 from openbot.agents.tools import get_current_time, run_bash_command, remove_file
 
+from langchain.agents.middleware import AgentMiddleware
+
+# * class AutoModelSelector(AgentMiddleware):
+# *     """自动模型选择器"""
+# *
+# *     def __init__(self, models: Dict[str, BaseChatModel]):
+# *         self._models = models
+# *
+# *     def list_models(self) -> Dict[str, BaseChatModel]:
+# *         """列出所有已加载的模型"""
+# *         return self._models
+# *
+# *     def set_default_model(self, name: str) -> None:
+# *         """设置默认模型"""
+# *         self._default_model = name
+# *
+# *     def before_model(self, state: StateT, runtime: Runtime[ContextT]) -> dict[str, Any] | None:
+# *         return super().before_model(state, runtime)
+
 
 class ModelManager:
     """模型管理器核心类"""

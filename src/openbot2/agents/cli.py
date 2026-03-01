@@ -27,7 +27,7 @@ from rich.theme import Theme
 
 from openbot.agents.core import OpenBotExecutor
 from openbot.config import ConfigManager
-from openbot.channels.base import ChatMessage, ContentType
+from openbot.botflow.database import ChatMessage, ContentType
 
 
 def setup_logging():
