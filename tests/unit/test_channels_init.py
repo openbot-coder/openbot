@@ -1,8 +1,7 @@
 import pytest
-from openbot.channels import ChatChannel, ConsoleChannel, WebSocketChannel
+from openbot.channels import ChatChannel, WeChatBotChatChannel
 from openbot.channels.base import ChatChannel as BaseChatChannel
-from openbot.channels.console import ConsoleChannel as BaseConsoleChannel
-from openbot.channels.websocket import WebSocketChannel as BaseWebSocketChannel
+from openbot.channels.wechat import WeChatBotChatChannel as BaseWeChatBotChatChannel
 
 
 class TestChannelsInit:
@@ -13,15 +12,10 @@ class TestChannelsInit:
         assert ChatChannel is not None
         assert ChatChannel is BaseChatChannel
 
-    def test_console_channel_import(self):
-        """测试 ConsoleChannel 导入是否正确"""
-        assert ConsoleChannel is not None
-        assert ConsoleChannel is BaseConsoleChannel
-
-    def test_websocket_channel_import(self):
-        """测试 WebSocketChannel 导入是否正确"""
-        assert WebSocketChannel is not None
-        assert WebSocketChannel is BaseWebSocketChannel
+    def test_wechat_channel_import(self):
+        """测试 WeChatBotChatChannel 导入是否正确"""
+        assert WeChatBotChatChannel is not None
+        assert WeChatBotChatChannel is BaseWeChatBotChatChannel
 
 
 if __name__ == "__main__":

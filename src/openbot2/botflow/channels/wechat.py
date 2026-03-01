@@ -10,20 +10,13 @@ from fastapi import Request, Response
 from .base import ChatChannel
 from ..database import ChatMessage
 
-
 logger = logging.getLogger(__name__)
 
 
 class WeChatChannel(ChatChannel):
     """微信公众号通道"""
 
-    def __init__(
-        self,
-        app_id: str,
-        app_secret: str,
-        token: str,
-        path: str = "/wechat"
-    ):
+    def __init__(self, app_id: str, app_secret: str, token: str, path: str = "/wechat"):
         super().__init__(name="wechat")
         self.app_id = app_id
         self.app_secret = app_secret
@@ -31,6 +24,27 @@ class WeChatChannel(ChatChannel):
         self.path = path
         self._access_token: Optional[str] = None
         self._token_expires_at: float = 0
+        self._router = self._init_router()
+
+    def _init_router(self):
+        """初始化路由"""
+        from fastapi import APIRouter
+
+        router = APIRouter()
+
+        @router.get(self.path)
+        async def wechat_verify(request):
+            return await self.handle_verify(request)
+
+        @router.post(self.path)
+        async def wechat_message(request):
+            return await self.handle_message(request)
+
+        return router
+
+    def set_message_handler(self, handler):
+        """设置消息处理器"""
+        self._message_handler = handler
 
     async def start(self) -> None:
         """启动微信通道"""
@@ -83,7 +97,7 @@ class WeChatChannel(ChatChannel):
                 msg = ChatMessage(
                     channel_id=f"wechat:{from_user_id}",
                     content=text_content,
-                    role="user"
+                    role="user",
                 )
                 await self.on_receive(msg)
 

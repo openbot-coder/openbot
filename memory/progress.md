@@ -1,9 +1,82 @@
 # 问题优化方案记录
 
 ## 记录时间
-**日期**: 2026-02-23
+**日期**: 2026-02-27（最新更新）
 **记录人**: AI Assistant
 **状态**: 持续更新中
+
+---
+
+## 知识库记录
+
+### 知识 1: SSH 远程端口转发（2026-02-27）
+
+#### 应用场景
+将本地服务（如 BotFlow 运行在 localhost:8000）暴露到远程服务器，使外部可以通过远程服务器访问本地服务。
+
+#### 核心命令
+```bash
+# 基本远程端口转发
+ssh -R 8000:localhost:8000 user@remote-server
+
+# 后台运行（推荐）
+ssh -N -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -R 8000:localhost:8000 user@remote-server
+
+# 指定绑定地址（需要服务器 GatewayPorts clientspecified）
+ssh -R 0.0.0.0:8000:localhost:8000 user@remote-server
+```
+
+#### 服务器端配置
+```bash
+# 编辑 /etc/ssh/sshd_config
+GatewayPorts yes          # 或 clientspecified
+AllowTcpForwarding yes
+
+# 重启 SSH 服务
+sudo systemctl restart sshd
+
+# 开放防火墙端口
+sudo ufw allow 8000/tcp
+```
+
+#### GatewayPorts 选项对比
+| 选项值 | 绑定地址 | 外部访问 |
+|--------|----------|----------|
+| `no`（默认） | 127.0.0.1 | ❌ 不可 |
+| `yes` | 0.0.0.0 | ✅ 可 |
+| `clientspecified` | 客户端指定 | 按需 |
+
+#### 安全注意事项
+1. 生产环境建议使用 `GatewayPorts clientspecified`
+2. 配合防火墙限制访问来源 IP
+3. 使用 SSH 密钥认证，禁用密码登录
+
+---
+
+## 功能验证记录
+
+### 验证 1: MCP stock-brief-server 工具可用性（2026-02-26）
+
+#### 验证目的
+验证 MCP 股票查询工具是否正常工作，以及数据返回格式是否符合预期。
+
+#### 验证结果
+| 测试项 | 结果 | 说明 |
+|--------|------|------|
+| 万科A（SZ000002）查询 | ✅ 通过 | 返回完整的基本数据、交易数据、财务数据、技术指标 |
+| 亨通光电（SH600487）查询 | ✅ 通过 | 返回完整数据，包含资金流向和换手率 |
+| 数据格式 | ✅ 通过 | Markdown 结构化文本，易于解析和展示 |
+| 数据时效性 | ✅ 通过 | 数据日期为 2026-02-26，实时性良好 |
+
+#### 关键发现
+1. **工具功能完善**: stock-brief-server 提供 brief、medium、full 三种详细程度的数据
+2. **数据覆盖全面**: 包含价格、成交量、资金流向、财务指标、技术指标等
+3. **使用便捷**: 只需提供股票代码（如 SH600487、SZ000002）
+
+#### 优化建议
+1. 考虑将股票查询功能集成到 BotFlow 的对话流程中
+2. 可添加股票代码自动识别功能（支持股票名称转代码）
+3. 可扩展支持港股、美股市场
 
 ---
 
@@ -275,6 +348,8 @@ class OpenbotConfig(BaseModel):
 | LangChainMCPToolManager 类实现不完整 | 🔴 高 | 🔴 高 | P0 | 待办 |
 | 配置模型缺少 mcp_servers | 🟡 中 | 🔴 高 | P1 | 待办 |
 | 文档与实现不同步 | 🟢 低 | 🟡 中 | P2 | 待办 |
+| 股票名称转代码功能缺失 | 🟢 低 | 🟡 中 | P3 | 建议项 |
+| BotFlow 远程部署方案 | 🟢 低 | 🟡 中 | P3 | 建议项 |
 
 ---
 
@@ -333,4 +408,6 @@ class OpenbotConfig(BaseModel):
 ### 修改历史
 | 日期 | 修改内容 | 修改人 |
 |------|----------|--------|
+| 2026-02-27 | 添加 SSH 远程端口转发知识库记录 | AI Assistant |
+| 2026-02-26 | 添加 MCP stock-brief-server 功能验证记录 | AI Assistant |
 | 2026-02-23 | 初始创建问题优化方案 | AI Assistant |
