@@ -119,11 +119,17 @@ async def query_func(
     else:
         user_message = str(msgs)
 
-    # 从 request 中获取参数
-    agent_name = getattr(request, "agent_name", "assistant") if request else "assistant"
-    model_id = getattr(request, "model_id", "doubao_auto") if request else "doubao_auto"
-    session_id = request.session_id if request else "default"
-    user_id = request.user_id if request else "user"
+    # 从 request 中获取参数，如果 kwargs 中有则优先使用 kwargs
+    agent_name = kwargs.get(
+        "agent_name",
+        getattr(request, "agent_name", "assistant") if request else "assistant",
+    )
+    model_id = kwargs.get(
+        "model_id",
+        getattr(request, "model_id", "doubao_auto") if request else "doubao_auto",
+    )
+    session_id = getattr(request, "session_id", "default") if request else "default"
+    user_id = getattr(request, "user_id", "user") if request else "user"
 
     print(f"[query_func] Received message: {user_message}")
     print(f"[query_func] Agent: {agent_name}, Model: {model_id}, Session: {session_id}")
@@ -182,7 +188,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-@agent_app.get("/")
+@agent_app.get("/test")
 async def webui_root(request: Request):
     """WebUI 首页"""
     html_content = """
