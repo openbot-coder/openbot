@@ -134,7 +134,7 @@ class ToolKitManager:
                         transport=config.get("transport", "sse"),
                         headers=config.get("headers", None),
                         timeout=config.get("timeout", 30),
-                        sse_read_timeout=config.get("sse_read_timeout", 60 * 5)
+                        sse_read_timeout=config.get("sse_read_timeout", 60 * 5),
                         ** client_kwargs,
                     )
                     await client.connect()
@@ -145,7 +145,7 @@ class ToolKitManager:
                         transport=config.get("transport", "sse"),
                         headers=config.get("headers", None),
                         timeout=config.get("timeout", 30),
-                        sse_read_timeout=config.get("sse_read_timeout", 60 * 5)
+                        sse_read_timeout=config.get("sse_read_timeout", 60 * 5),
                         ** client_kwargs,
                     )
             elif "command" in config:
