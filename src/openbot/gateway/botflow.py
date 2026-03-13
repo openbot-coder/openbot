@@ -12,7 +12,13 @@ class BotFlow:
         self.toolkit_manager = ToolKitManager()
         self.toolkit_manager.register_buildin_tools()
         self.toolkit_manager.register_db_tools()
-        self.toolkit_manager.register_skill_dir("E:\\src\o\penbot\\.trae\\skills")
+
+    async def initialize(self):
+        """Async initialization to register skill directories"""
+        await self.toolkit_manager.register_skill_dir("E:\\src\\openbot\\.trae\\skills")
+        await self.toolkit_manager.register_skill_dir(
+            "E:\\src\\openbot\\agentscope-skills\\skills"
+        )
 
     def create_agent(self, name: str, system_prompt: str, model_id: str) -> ReActAgent:
         model, formatter = self.model_manager.build_chatmodel(model_id)
@@ -36,6 +42,7 @@ if __name__ == "__main__":
         )
         config = config_manager.config
         bot_flow = BotFlow(config)
+        await bot_flow.initialize()
         agent = bot_flow.create_agent("test_agent", "你是一个智能助手", "doubao_auto")
         while True:
             user_input = input("用户: ")
