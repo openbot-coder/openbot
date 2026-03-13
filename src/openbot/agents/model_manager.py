@@ -42,6 +42,7 @@ class ModelManager:
     def __init__(self, model_configs: Dict[str, ModelConfig]):
         self._model_configs = model_configs
         self._active_models: Dict[str, ChatModelBase] = {}
+        self._formatters: Dict[str, FormatterBase] = {}
         self._default_model = None
         self._formatter_cache: Dict[Type[FormatterBase], Type[FormatterBase]] = {}
 
@@ -158,13 +159,14 @@ class ModelManager:
     def build_chatmodel(self, model_id: str) -> Tuple[ChatModelBase, FormatterBase]:
         """获取指定模型配置"""
         if model_id in self._active_models:
-            return self._active_models[model_id]
+            return self._active_models[model_id], self._formatters.get(model_id)
 
         cfg = self._model_configs.get(model_id, None)
         if not cfg:
             raise ValueError(f"Model configuration for {model_id} not found")
         model, formatter = self._create_model_and_formatter(cfg)
         self._active_models[model_id] = model
+        self._formatters[model_id] = formatter
         return model, formatter
 
 
