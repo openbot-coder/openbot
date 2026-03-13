@@ -12,13 +12,17 @@ class BotFlow:
         self.toolkit_manager = ToolKitManager()
         self.toolkit_manager.register_buildin_tools()
         self.toolkit_manager.register_db_tools()
+        self._initialized = False
 
     async def initialize(self):
         """Async initialization to register skill directories"""
+        if self._initialized:
+            return
         await self.toolkit_manager.register_skill_dir("E:\\src\\openbot\\.trae\\skills")
         await self.toolkit_manager.register_skill_dir(
             "E:\\src\\openbot\\agentscope-skills\\skills"
         )
+        self._initialized = True
 
     def create_agent(self, name: str, system_prompt: str, model_id: str) -> ReActAgent:
         model, formatter = self.model_manager.build_chatmodel(model_id)
