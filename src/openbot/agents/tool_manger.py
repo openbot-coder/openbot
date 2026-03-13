@@ -30,6 +30,11 @@ class ToolKitManager:
         self._toolkit = Toolkit()
         self._registered_skill_dirs: List[str] = []
 
+    @property
+    def toolkit(self) -> Toolkit:
+        """获取工具包"""
+        return self._toolkit
+
     def register_buildin_tools(self) -> Toolkit:
         """构建内建工具包"""
 

@@ -31,8 +31,9 @@ class BotFlowConfig(BaseModel):
     work_dir: str = Field(default=str(Path("./").absolute()))
     model_configs: Dict[str, ModelConfig] = Field(default_factory=dict)
     mcp_config_path: str = Field(default="{$OPENBOT_HOMESPACE}/config/mcp.json")
+    db_path: str = Field(default="{$OPENBOT_HOMESPACE}/memory/memory.db")
     host: str = Field(default="127.0.0.1")
-    port: int = int(os.environ.get("PORT", 8000))
+    port: int = Field(default=8000)
     debug: bool = Field(default=False)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
