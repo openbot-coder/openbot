@@ -1,6 +1,7 @@
 """
 OpenBot Gateway - 基于 AgentScope Runtime 的多智能体 WebUI 服务
 """
+
 import os
 from contextlib import asynccontextmanager
 from typing import Dict, List, Any
@@ -30,6 +31,7 @@ _bot_flow: BotFlow = None
 
 class MessageRequest(BaseModel):
     """消息请求模型"""
+
     message: str
     agent_name: str = "assistant"
     model_id: str = "doubao_auto"
@@ -39,6 +41,7 @@ class MessageRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     """消息响应模型"""
+
     response: str
     agent_name: str
     session_id: str
@@ -56,7 +59,7 @@ async def lifespan(app: FastAPI):
     config_path = os.path.join(
         os.getenv("OPENBOT_HOMESPACE", "E:\\src\\openbot\\.openbot"),
         "config",
-        "config.json"
+        "config.json",
     )
     config_manager = ConfigManager(config_path)
     config = config_manager.config
@@ -110,15 +113,17 @@ async def query_func(
 
     # 解析请求参数
     if isinstance(msgs, list) and len(msgs) > 0:
-        user_message = msgs[-1].content if hasattr(msgs[-1], 'content') else str(msgs[-1])
+        user_message = (
+            msgs[-1].content if hasattr(msgs[-1], "content") else str(msgs[-1])
+        )
     else:
         user_message = str(msgs)
 
     # 从 request 中获取参数
-    agent_name = getattr(request, 'agent_name', 'assistant') if request else 'assistant'
-    model_id = getattr(request, 'model_id', 'doubao_auto') if request else 'doubao_auto'
-    session_id = request.session_id if request else 'default'
-    user_id = request.user_id if request else 'user'
+    agent_name = getattr(request, "agent_name", "assistant") if request else "assistant"
+    model_id = getattr(request, "model_id", "doubao_auto") if request else "doubao_auto"
+    session_id = request.session_id if request else "default"
+    user_id = request.user_id if request else "user"
 
     print(f"[query_func] Received message: {user_message}")
     print(f"[query_func] Agent: {agent_name}, Model: {model_id}, Session: {session_id}")
@@ -126,9 +131,7 @@ async def query_func(
     try:
         # 创建或获取智能体
         agent = _bot_flow.create_agent(
-            name=agent_name,
-            system_prompt="你是一个有用的智能助手",
-            model_id=model_id
+            name=agent_name, system_prompt="你是一个有用的智能助手", model_id=model_id
         )
 
         # 创建用户消息
@@ -395,10 +398,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             user_id = message_data.get("user_id", "user")
 
             # 通知客户端开始新会话
-            await manager.send_message(client_id, {
-                "type": "session_start",
-                "session_id": session_id
-            })
+            await manager.send_message(
+                client_id, {"type": "session_start", "session_id": session_id}
+            )
 
             # 创建请求对象
             agent_request = AgentRequest(
@@ -416,59 +418,168 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     agent_name=agent_name,
                     model_id=model_id,
                 ):
-                    if hasattr(msg, 'content'):
-                        await manager.send_message(client_id, {
-                            "type": "chunk",
-                            "content": msg.content
-                        })
+                    if hasattr(msg, "content"):
+                        await manager.send_message(
+                            client_id, {"type": "chunk", "content": msg.content}
+                        )
 
                     if last:
-                        await manager.send_message(client_id, {
-                            "type": "done"
-                        })
+                        await manager.send_message(client_id, {"type": "done"})
 
             except Exception as e:
-                await manager.send_message(client_id, {
-                    "type": "error",
-                    "content": str(e)
-                })
+                await manager.send_message(
+                    client_id, {"type": "error", "content": str(e)}
+                )
 
     except WebSocketDisconnect:
         manager.disconnect(client_id)
         print(f"Client {client_id} disconnected")
 
 
-# API 端点（非流式）
-@agent_app.post("/api/chat")
-async def api_chat(request: MessageRequest):
-    """非流式聊天 API"""
+# API 端点（非流式）- 符合 AgentScope Runtime 标准
+@agent_app.post("/process")
+async def process_endpoint(
+    request: AgentRequest,
+    message: str = None,
+    agent_name: str = "assistant",
+    model_id: str = "doubao_auto",
+):
+    """
+    处理请求端点 - 符合 AgentScope Runtime 标准
+    支持两种调用方式：
+    1. 标准 AgentRequest 格式（推荐）
+    2. 简化格式：{ "message": "...", "agent_name": "...", "model_id": "..." }
+    """
     global _bot_flow
 
     if not _bot_flow:
         return {"error": "Service not initialized"}
 
     try:
+        # 提取消息内容
+        if message:
+            user_message = message
+        elif hasattr(request, "input") and request.input:
+            # 从 request.input 提取最后一条用户消息
+            if isinstance(request.input, list) and len(request.input) > 0:
+                last_msg = request.input[-1]
+                if hasattr(last_msg, "content"):
+                    user_message = last_msg.content
+                elif isinstance(last_msg, dict):
+                    user_message = last_msg.get("content", str(last_msg))
+                else:
+                    user_message = str(last_msg)
+            else:
+                user_message = str(request.input)
+        else:
+            return {"error": "No message provided"}
+
+        # 使用 request 中的参数或默认值
+        agent_name_to_use = getattr(request, "agent_name", agent_name)
+        model_id_to_use = getattr(request, "model_id", model_id)
+        session_id = getattr(request, "session_id", "default")
+        user_id = getattr(request, "user_id", "user")
+
         agent = _bot_flow.create_agent(
-            name=request.agent_name,
+            name=agent_name_to_use,
             system_prompt="你是一个有用的智能助手",
-            model_id=request.model_id
+            model_id=model_id_to_use,
         )
 
         user_msg = Msg(
-            name=request.user_id,
-            content=request.message,
+            name=user_id,
+            content=user_message,
             role="user",
         )
 
         reply = await agent([user_msg])
 
-        return MessageResponse(
-            response=reply.content if hasattr(reply, 'content') else str(reply),
-            agent_name=request.agent_name,
-            session_id=request.session_id
-        )
+        # 返回标准格式响应
+        response_content = reply.content if hasattr(reply, "content") else str(reply)
+
+        return {
+            "status": "completed",
+            "response": {
+                "content": response_content,
+                "agent_name": agent_name_to_use,
+                "session_id": session_id,
+            },
+        }
+
     except Exception as e:
-        return {"error": str(e)}
+        return {"status": "error", "error": str(e)}
+
+
+# 流式处理端点 - 符合 AgentScope Runtime 标准
+@agent_app.post("/process/stream")
+async def process_stream_endpoint(
+    request: AgentRequest,
+    message: str = None,
+    agent_name: str = "assistant",
+    model_id: str = "doubao_auto",
+):
+    """
+    流式处理端点 - 符合 AgentScope Runtime 标准
+    返回 Server-Sent Events 格式的流式响应
+    """
+    global _bot_flow
+
+    if not _bot_flow:
+        yield 'data: {"status":"error","error":"Service not initialized"}\n\n'
+        return
+
+    try:
+        # 提取消息内容
+        if message:
+            user_message = message
+        elif hasattr(request, "input") and request.input:
+            if isinstance(request.input, list) and len(request.input) > 0:
+                last_msg = request.input[-1]
+                if hasattr(last_msg, "content"):
+                    user_message = last_msg.content
+                elif isinstance(last_msg, dict):
+                    user_message = last_msg.get("content", str(last_msg))
+                else:
+                    user_message = str(last_msg)
+            else:
+                user_message = str(request.input)
+        else:
+            yield 'data: {"status":"error","error":"No message provided"}\n\n'
+            return
+
+        agent_name_to_use = getattr(request, "agent_name", agent_name)
+        model_id_to_use = getattr(request, "model_id", model_id)
+        session_id = getattr(request, "session_id", "default")
+        user_id = getattr(request, "user_id", "user")
+
+        agent = _bot_flow.create_agent(
+            name=agent_name_to_use,
+            system_prompt="你是一个有用的智能助手",
+            model_id=model_id_to_use,
+        )
+
+        user_msg = Msg(
+            name=user_id,
+            content=user_message,
+            role="user",
+        )
+
+        # 发送初始响应
+        yield f'data: {{"status":"processing","session_id":"{session_id}"}}\n\n'
+
+        # 流式输出
+        async for msg, last in stream_printing_messages(
+            agents=[agent],
+            coroutine_task=agent([user_msg]),
+        ):
+            if hasattr(msg, "content"):
+                yield f'data: {{"status":"in_progress","content":"{msg.content}"}}\n\n'
+
+            if last:
+                yield f'data: {{"status":"completed","agent_name":"{agent_name_to_use}","session_id":"{session_id}"}}\n\n'
+
+    except Exception as e:
+        yield f'data: {{"status":"error","error":"{str(e)}"}}\n\n'
 
 
 # 健康检查端点
@@ -477,7 +588,8 @@ async def health_check():
     """健康检查"""
     return {
         "status": "healthy",
-        "bot_flow_initialized": _bot_flow is not None
+        "service": "AgentScope Runtime",
+        "bot_flow_initialized": _bot_flow is not None,
     }
 
 
