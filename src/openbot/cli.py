@@ -16,6 +16,7 @@ logging.getLogger("agentscope").setLevel(logging.WARNING)
 from rich.console import Console
 from rich.prompt import Prompt
 from rich.theme import Theme
+from rich.markdown import Markdown
 
 custom_theme = Theme(
     {
@@ -28,7 +29,7 @@ custom_theme = Theme(
 )
 
 console = Console(theme=custom_theme)
-
+from agentscope.pipeline import stream_printing_messages
 from openbot.gateway.botflow import BotFlow
 from openbot.agents.tool_manger import ToolKitManager
 from openbot.config import BotFlowConfig
@@ -190,53 +191,57 @@ class OpenBotCLI:
         if not message.strip():
             return
 
-        console.print("[dim]🤔 处理中...[/dim]", end="\r")
-
         try:
             agent = self.bot_flow.create_agent(
                 name="cli_assistant",
                 system_prompt="你是一个有用的智能助手",
                 model_id=self.current_model,
             )
+            agent.set_console_output_enabled(False)
 
             from agentscope.message import Msg
 
             user_msg = Msg(name="user", content=message, role="user")
 
-            response = await agent.reply([user_msg])
-            console.print(f"[dim]原始响应: {response}[/dim]")
+            with console.status("[dim]🤔 处理中...[/dim]"):
+                reply_content = []
+                async for msg, last in stream_printing_messages(
+                    agents=[agent],
+                    coroutine_task=agent([user_msg]),
+                ):
+                    if not hasattr(msg, "content") or not msg.content:
+                        continue
 
-            if isinstance(response, Msg):
-                if hasattr(response, "content") and isinstance(response.content, list):
-                    for block in response.content:
-                        if isinstance(block, dict):
-                            block_type = block.get("type")
-                            if block_type == "tool_use":
-                                tool_name = block.get("name", "unknown")
-                                console.print(f"[tool]🔧 调用工具: {tool_name}[/tool]")
-                            elif block_type == "tool_result":
-                                output = block.get("output", [])
-                                if output:
-                                    for o in output:
-                                        if (
-                                            isinstance(o, dict)
-                                            and o.get("type") == "text"
-                                        ):
-                                            console.print(
-                                                f"[tool]📤 工具返回: {o.get('text', '')}[/tool]"
-                                            )
+                    for content_block in msg.content:
+                        if not isinstance(content_block, dict):
+                            continue
 
-                text_content = response.get_text_content()
-                if text_content:
+                        block_type = content_block.get("type")
+                        if block_type == "tool_use":
+                            tool_name = content_block.get("name", "unknown")
+                            console.print(
+                                f"[magenta]🔧 调用工具: {tool_name}[/magenta]"
+                            )
+                        elif block_type == "tool_result":
+                            output = content_block.get("output", [])
+                            if output:
+                                for o in output:
+                                    if isinstance(o, dict) and o.get("type") == "text":
+                                        console.print(
+                                            f"[magenta]📤 工具返回: {o.get('text', '')}[/magenta]"
+                                        )
+                        elif msg.role == "assistant" and block_type == "text":
+                            text_content = content_block.get("text", "")
+                            if text_content:
+                                reply_content.append(text_content)
+
+            if reply_content:
+                for content_block in reply_content:
+                    markdown_content = Markdown(content_block)
                     console.print("[cyan]🤖:[/cyan]", end=" ")
-                    console.print(text_content)
-            else:
-                content = str(response)
-                console.print("[cyan]🤖:[/cyan]", end=" ")
-                console.print(content)
+                    console.print(markdown_content)
 
             console.print()
-
             self.message_count += 2
 
         except Exception as e:
