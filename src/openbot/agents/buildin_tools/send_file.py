@@ -37,6 +37,8 @@ def _auto_as_type(mt: str) -> str:
         return "audio"
     if mt.startswith("video/"):
         return "video"
+    if mt.startswith("text/"):
+        return "text"
     return "file"
 
 

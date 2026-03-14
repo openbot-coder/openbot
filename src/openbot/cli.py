@@ -6,25 +6,47 @@ import asyncio
 import logging
 import os
 import sys
+import locale
 from datetime import datetime
 from pathlib import Path
 
-logging.basicConfig(level=logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("agentscope").setLevel(logging.WARNING)
+# 设置标准输入输出编码为UTF-8
+sys.stdin.reconfigure(encoding='utf-8')
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
+# 设置环境变量强制使用UTF-8编码
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+os.environ['LC_ALL'] = 'en_US.UTF-8'
+os.environ['LANG'] = 'en_US.UTF-8'
+
+logging.basicConfig(level=logging.ERROR)
+logging.getLogger("httpx").setLevel(logging.ERROR)
+logging.getLogger("agentscope").setLevel(logging.ERROR)
+logging.getLogger("agentscope_runtime").setLevel(logging.ERROR)
+logging.getLogger("root").setLevel(logging.CRITICAL)
 
 from rich.console import Console
-from rich.prompt import Prompt
+from prompt_toolkit import PromptSession
+from prompt_toolkit.styles import Style as PromptStyle
 from rich.theme import Theme
 from rich.markdown import Markdown
 
 custom_theme = Theme(
     {
-        "info": "dim cyan",
-        "warning": "yellow",
-        "error": "bold red",
-        "success": "bold green",
-        "tool": "magenta",
+        "info": "sky_blue2",
+        "warning": "bold dark_orange",
+        "error": "bold bright_red on grey15",
+        "success": "bold spring_green3",
+        "tool": "bold #FFFFE0",     # 工具调用 - 浅黄色 (light yellow)
+        "tool_func": "white",        # 调用函数 - 白色
+        "tool_arg": "#808080",       # 调用参数 - 灰色
+        "tool_result": "bold #FFFFE0",  # 工具调用结果 - 浅黄色
+        "tool_result_content": "#808080",  # 具体结果 - 灰色
+        "user": "bold #00FF7F",
+        "assistant": "bold #00BFFF",  # 机器人回复 - 鲜蓝色 (DeepSkyBlue)
+        "muted": "dim grey70",
+        "highlight": "bold bright_yellow",
     }
 )
 
@@ -36,14 +58,14 @@ from openbot.config import BotFlowConfig
 
 
 def print_banner():
-    """打印欢迎横幅"""
+    """Print welcome banner"""
     console.print()
     console.print(
         "╔══════════════════════════════════════════════════════════╗",
         style="bold cyan",
     )
     console.print(
-        "║         🤖 OpenBot CLI - 多智能体交互式会话              ║",
+        "║         🤖 OpenBot CLI - Multi-Agent Interactive Session  ║",
         style="bold cyan",
     )
     console.print(
@@ -54,82 +76,83 @@ def print_banner():
 
 
 def print_help():
-    """打印帮助信息"""
-    console.print("\n[bold yellow]可用命令:[/bold yellow]")
-    console.print("  [green]/help[/green]      - 显示帮助信息")
-    console.print("  [green]/clear[/green]     - 清除会话历史")
-    console.print("  [green]/history[/green]   - 显示当前会话消息数")
-    console.print("  [green]/stats[/green]     - 显示会话统计信息")
-    console.print("  [green]/models[/green]    - 显示可用模型列表")
-    console.print("  [green]/tools[/green]     - 显示可用工具列表")
-    console.print("  [green]/model[/green]     - 切换当前使用的模型")
-    console.print("  [green]/exit[/green]      - 退出程序")
+    """Print help information"""
+    console.print("\n[bold yellow]Available Commands:[/bold yellow]")
+    console.print("  [green]/help[/green]      - Show help information")
+    console.print("  [green]/clear[/green]    - Clear session history")
+    console.print("  [green]/history[/green] - Show current session message count")
+    console.print("  [green]/stats[/green]    - Show session statistics")
+    console.print("  [green]/models[/green]   - Show available models")
+    console.print("  [green]/tools[/green]    - Show available tools")
+    console.print("  [green]/model[/green]    - Switch current model")
+    console.print("  [green]/exit[/green]     - Exit the program")
     console.print()
 
 
 def print_session_info(bot_flow: BotFlow, message_count: int, session_start: datetime):
-    """打印会话信息"""
+    """Print session information"""
     available_models = list(bot_flow.config.model_configs.keys())
 
     console.print(
         "┌──────────────────────────────────────────────────────────┐", style="dim"
     )
     console.print(
-        "│                           会话信息                         │", style="dim"
+        "│                         Session Info                      │", style="dim"
     )
     console.print(
         "├──────────────────────────────────────────────────────────┤", style="dim"
     )
-    console.print(f"│  可用模型: {', '.join(available_models):<30} │")
-    console.print(f"│  消息历史: {message_count} 条消息{' ' * 25}│")
-    console.print(f"│  会话时长: {datetime.now() - session_start}{' ' * 20}│")
+    console.print(f"│  Available Models: {', '.join(available_models):<30} │")
+    console.print(f"│  Message History: {message_count} messages{' ' * 25}│")
+    console.print(f"│  Session Duration: {datetime.now() - session_start}{' ' * 19}│")
     console.print(
         "└──────────────────────────────────────────────────────────┘", style="dim"
     )
     console.print()
-    console.print("[dim]输入 /help 获取帮助, /exit 退出[/dim]")
+    console.print("[dim]Type /help for help, /exit to quit[/dim]")
     console.print()
 
 
 def print_stats(message_count: int, session_start: datetime):
-    """打印会话统计"""
+    """Print session statistics"""
     duration = datetime.now() - session_start
     hours, remainder = divmod(int(duration.total_seconds()), 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    console.print("\n[bold cyan]会话统计:[/bold cyan]")
-    console.print(f"  会话时长: {hours:02d}:{minutes:02d}:{seconds:02d}")
-    console.print(f"  消息总数: {message_count}\n")
+    console.print("\n[bold cyan]Session Statistics:[/bold cyan]")
+    console.print(f"  Session Duration: {hours:02d}:{minutes:02d}:{seconds:02d}")
+    console.print(f"  Total Messages: {message_count}\n")
 
 
 def print_models(bot_flow: BotFlow):
-    """打印可用模型列表"""
-    console.print("\n[bold cyan]可用模型:[/bold cyan]")
+    """Print available models"""
+    console.print("\n[bold cyan]Available Models:[/bold cyan]")
 
     for i, (name, config) in enumerate(bot_flow.config.model_configs.items(), 1):
-        model_type = config.get("model_type", "unknown")
-        model_name = config.get("model_name", name)
+        provider = getattr(config, "provider", "unknown")
+        model_name = getattr(config, "model", name)
         console.print(f"  {i}. [white]{name}[/white]")
-        console.print(f"      类型: {model_type}, 模型: {model_name}")
+        console.print(f"      Provider: {provider}, Model: {model_name}")
     console.print()
 
 
 def print_tools(bot_flow: BotFlow):
-    """打印可用工具列表"""
+    """Print available tools"""
     tools = bot_flow.toolkit_manager.list_tools()
 
-    console.print(f"\n[bold cyan]可用工具 ({len(tools)}):[/bold cyan]")
+    console.print(f"\n[bold cyan]Available Tools ({len(tools)}):[/bold cyan]")
 
     for i, tool in enumerate(tools[:20], 1):
         console.print(f"  {i}. [white]{tool}[/white]")
 
     if len(tools) > 20:
-        console.print(f"  [dim]... 还有 {len(tools) - 20} 个工具[/dim]")
+        console.print(f"  [dim]... and {len(tools) - 20} more tools[/dim]")
     console.print()
 
 
 class OpenBotCLI:
-    def __init__(self, homespace: str = None):
+    def __init__(self, homespace: str = None, workspace: str = None):
+        # homespace: bot 的配置、记忆、技能根目录
         if homespace:
             self.homespace = homespace
         elif os.getenv("OPENBOT_HOMESPACE"):
@@ -141,28 +164,52 @@ class OpenBotCLI:
             else:
                 self.homespace = str(Path.home() / ".openbot")
 
+        # workspace: 用户工作目录，默认为当前目录
+        if workspace:
+            self.workspace = workspace
+        else:
+            self.workspace = os.getcwd()
+
         os.environ["OPENBOT_HOMESPACE"] = self.homespace
+        os.environ["OPENBOT_WORKSPACE"] = self.workspace
 
         self.bot_flow = None
         self.session_start = datetime.now()
         self.message_count = 0
         self.current_model = "doubao_auto"
         self.running = True
+        # 初始化 prompt_toolkit 会话 - 鲜绿色 (#00FF7F)
+        self.prompt_session = PromptSession(
+            style=PromptStyle.from_dict({
+                'prompt': 'bold #00FF7F',
+                'input': '#ffffff',
+            })
+        )
 
     async def initialize(self):
-        """初始化 BotFlow"""
-        console.print("[cyan]初始化 OpenBot...[/cyan]")
-        console.print(f"[dim]工作目录: {self.homespace}[/dim]")
+        """Initialize BotFlow"""
+        console.print("[cyan]Initializing OpenBot...[/cyan]")
+        console.print(f"[dim]HomeSpace (Bot config): {self.homespace}[/dim]")
+        console.print(f"[dim]Workspace (User work dir): {self.workspace}[/dim]")
 
+        # 初始化过程中静默日志
+        logging.disable(logging.CRITICAL)
+        
         self.bot_flow = BotFlow(homespace=self.homespace)
         await self.bot_flow.initialize()
 
         available_models = list(self.bot_flow.config.model_configs.keys())
+        # 校验用户指定的模型是否存在
         if available_models:
-            self.current_model = available_models[0]
+            if self.current_model not in available_models:
+                console.print(f"[warning]⚠️ Specified model '{self.current_model}' not found, using default: {available_models[0]}[/warning]")
+                self.current_model = available_models[0]
 
-        console.print("[success]✅ OpenBot 初始化完成[/success]")
-        console.print(f"[dim]可用模型: {', '.join(available_models)}[/dim]")
+        # 恢复日志级别
+        logging.disable(logging.NOTSET)
+        
+        console.print("[success]✅ OpenBot initialized successfully[/success]")
+        console.print(f"[dim]Available models: {', '.join(available_models)}[/dim]")
         console.print()
 
     def _clean_response_content(self, content):
@@ -187,14 +234,17 @@ class OpenBotCLI:
         return content
 
     async def chat(self, message: str):
-        """处理聊天消息"""
+        """Process chat message"""
         if not message.strip():
             return
+
+        # 用于标记是否被用户中断
+        interrupted = False
 
         try:
             agent = self.bot_flow.create_agent(
                 name="cli_assistant",
-                system_prompt="你是一个有用的智能助手",
+                system_prompt="You are a helpful AI assistant",
                 model_id=self.current_model,
             )
             agent.set_console_output_enabled(False)
@@ -203,49 +253,86 @@ class OpenBotCLI:
 
             user_msg = Msg(name="user", content=message, role="user")
 
-            with console.status("[dim]🤔 处理中...[/dim]"):
+            with console.status("[dim]🤔 Processing...[/dim]"):
                 reply_content = []
-                async for msg, last in stream_printing_messages(
-                    agents=[agent],
-                    coroutine_task=agent([user_msg]),
-                ):
-                    if not hasattr(msg, "content") or not msg.content:
-                        continue
-
-                    for content_block in msg.content:
-                        if not isinstance(content_block, dict):
+                try:
+                    async for msg, last in stream_printing_messages(
+                        agents=[agent],
+                        coroutine_task=agent([user_msg]),
+                    ):
+                        if not hasattr(msg, "content") or not msg.content:
                             continue
 
-                        block_type = content_block.get("type")
-                        if block_type == "tool_use":
-                            tool_name = content_block.get("name", "unknown")
-                            console.print(
-                                f"[magenta]🔧 调用工具: {tool_name}[/magenta]"
-                            )
-                        elif block_type == "tool_result":
-                            output = content_block.get("output", [])
-                            if output:
-                                for o in output:
-                                    if isinstance(o, dict) and o.get("type") == "text":
-                                        console.print(
-                                            f"[magenta]📤 工具返回: {o.get('text', '')}[/magenta]"
-                                        )
-                        elif msg.role == "assistant" and block_type == "text":
-                            text_content = content_block.get("text", "")
-                            if text_content:
-                                reply_content.append(text_content)
+                        for content_block in msg.content:
+                            if not isinstance(content_block, dict):
+                                continue
 
+                            block_type = content_block.get("type")
+                            if block_type == "tool_use":
+                                tool_name = content_block.get("name", "unknown")
+                                # 获取工具参数
+                                tool_args = content_block.get("input", {})
+                                args_str = ", ".join([f"{k}={repr(v)}" for k, v in tool_args.items()]) if tool_args else ""
+                                console.print(
+                                    f"[tool]🔧 Tool Call: [tool_func]{tool_name}[/tool_func]([tool_arg]{args_str}[/tool_arg])[/tool]"
+                                )
+                            elif block_type == "tool_result":
+                                output = content_block.get("output", [])
+                                if output:
+                                    for o in output:
+                                        if isinstance(o, dict) and o.get("type") == "text":
+                                            result_text = o.get('text', '')
+                                            # 计算行数
+                                            lines = result_text.split('\n')
+                                            line_count = len(lines)
+                                            
+                                            if line_count > 10:
+                                                # 超过10行，截断并显示提示
+                                                truncated_lines = lines[:10]
+                                                truncated_text = '\n'.join(truncated_lines)
+                                                console.print(
+                                                    f"[tool_result]📤 Result: [tool_result_content]{truncated_text}[/tool_result_content]\n"
+                                                    f"[tool_result]   [dim](... {line_count - 10} more lines, output truncated ...)[/tool_result]"
+                                                )
+                                            else:
+                                                console.print(
+                                                    f"[tool_result]📤 Result: [tool_result_content]{result_text}[/tool_result_content][/tool_result]"
+                                                )
+                            elif msg.role == "assistant" and block_type == "text":
+                                text_content = content_block.get("text", "")
+                                if text_content:
+                                    reply_content.append(text_content)
+                except KeyboardInterrupt:
+                    # 用户按 Ctrl+C 中断思考
+                    interrupted = True
+                    console.print()
+                    console.print("[warning]⚠️ 当前思考已被中断，输入已取消[/warning]")
+                    console.print()
+                    return
+
+            # 如果被中断，不显示回复内容
+            if interrupted:
+                return
+
+            # 获取 bot 名称
+            bot_name = getattr(agent, "name", "botname").upper() if agent else "botname"
+            
             if reply_content:
                 for content_block in reply_content:
                     markdown_content = Markdown(content_block)
-                    console.print("[cyan]🤖:[/cyan]", end=" ")
+                    console.print(f"[assistant]{bot_name} >[/assistant]", end=" ")
                     console.print(markdown_content)
 
             console.print()
             self.message_count += 2
 
+        except KeyboardInterrupt:
+            # 捕获外层的 KeyboardInterrupt
+            console.print()
+            console.print("[warning]⚠️ 当前思考已被中断，输入已取消[/warning]")
+            console.print()
         except Exception as e:
-            console.print(f"[error]❌ 错误: {str(e)}[/error]")
+            console.print(f"[error]❌ Error: {str(e)}[/error]")
             console.print()
 
     async def run(self):
@@ -257,7 +344,8 @@ class OpenBotCLI:
 
         while self.running:
             try:
-                user_input = Prompt.ask("[green]>[/green] ")
+                user_input = await self.prompt_session.prompt_async("YOU > ")
+                # prompt_toolkit 自动处理编码，无需额外解码
 
                 if not user_input.strip():
                     continue
@@ -267,16 +355,23 @@ class OpenBotCLI:
                 else:
                     await self.chat(user_input)
 
+            except UnicodeDecodeError:
+                console.print("[warning]⚠️ Invalid characters in input, please try again[/warning]")
+                continue
             except KeyboardInterrupt:
-                console.print("\n[yellow]使用 /exit 退出[/yellow]")
+                console.print("\n[warning]Use /exit to quit[/warning]")
                 continue
             except EOFError:
+                console.print("\n[info]Received exit signal, quitting...[/info]")
                 break
+            except Exception as e:
+                console.print(f"[error]❌ Error: {str(e)}[/error]")
+                console.print()
 
-        console.print("\n[cyan]👋 再见！[/cyan]")
+        console.print("\n[info]👋 Goodbye![/info]")
 
     async def handle_command(self, command: str):
-        """处理命令"""
+        """Handle commands"""
         cmd = command.strip().lower()
 
         if cmd in ["/exit", "/quit", "exit", "quit", "q"]:
@@ -290,7 +385,7 @@ class OpenBotCLI:
             print_banner()
 
         elif cmd == "/history":
-            console.print(f"\n[cyan]消息历史: {self.message_count} 条[/cyan]\n")
+            console.print(f"\n[cyan]Message History: {self.message_count} messages[/cyan]\n")
 
         elif cmd == "/stats":
             print_stats(self.message_count, self.session_start)
@@ -307,42 +402,62 @@ class OpenBotCLI:
                 model_name = parts[1]
                 if model_name in self.bot_flow.config.model_configs:
                     self.current_model = model_name
-                    console.print(f"[success]✅ 已切换到模型: {model_name}[/success]\n")
+                    console.print(f"[success]✅ Switched to model: {model_name}[/success]\n")
                 else:
-                    console.print(f"[error]❌ 未知的模型: {model_name}[/error]")
-                    console.print("[cyan]使用 /models 查看可用模型[/cyan]\n")
+                    console.print(f"[error]❌ Unknown model: {model_name}[/error]")
+                    console.print("[info]Use /models to see available models[/info]\n")
             else:
-                console.print(f"[cyan]当前模型: {self.current_model}[/cyan]")
-                console.print("[cyan]使用 /model <名称> 切换模型[/cyan]\n")
+                console.print(f"[info]Current model: {self.current_model}[/info]")
+                console.print("[info]Use /model <name> to switch model[/info]\n")
 
         else:
-            console.print(f"[warning]⚠️ 未知命令: {command}[/warning]")
-            console.print("[cyan]输入 /help 获取帮助[/cyan]\n")
+            console.print(f"[warning]⚠️ Unknown command: {command}[/warning]")
+            console.print("[info]Type /help for help[/info]\n")
 
 
 async def main():
-    """主函数"""
+    """Main function"""
     import argparse
 
-    parser = argparse.ArgumentParser(description="OpenBot CLI - 交互式控制台")
+    # 启动前静默所有日志
+    logging.disable(logging.CRITICAL)
+    
+    parser = argparse.ArgumentParser(description="OpenBot CLI - Interactive Console")
+    parser.add_argument(
+        "--homespace",
+        type=str,
+        default=None,
+        help="Bot's config, memory, skills root directory (default: ~/.openbot)",
+    )
     parser.add_argument(
         "--workspace",
         "-w",
         type=str,
         default=None,
-        help="工作区目录",
+        help="User's working directory (default: current directory)",
     )
     parser.add_argument(
         "--model",
         "-m",
         type=str,
         default="doubao_auto",
-        help="默认模型",
+        help="Default model",
     )
 
     args = parser.parse_args()
 
-    cli = OpenBotCLI(homespace=args.workspace)
+    print("Starting OpenBot CLI...")
+    print("Initializing OpenBot...")
+    
+    # homespace: bot 配置目录，默认 ~/.openbot
+    homespace = args.homespace or os.path.expanduser("~/.openbot")
+    # workspace: 用户工作目录，默认当前目录
+    workspace = args.workspace or os.getcwd()
+    
+    print(f"HomeSpace (Bot config): {homespace}")
+    print(f"Workspace (User work dir): {workspace}")
+
+    cli = OpenBotCLI(homespace=homespace, workspace=workspace)
     cli.current_model = args.model
     await cli.run()
 

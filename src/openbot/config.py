@@ -28,7 +28,7 @@ class ModelConfig(BaseModel):
 
 
 class BotFlowConfig(BaseModel):
-    work_dir: str = Field(default=str(Path("./").absolute()))
+    work_dir: str = Field(default="workspace")
     model_configs: Dict[str, ModelConfig] = Field(default_factory=dict)
     mcp_config_path: str = Field(default="{$OPENBOT_HOMESPACE}/config/mcp.json")
     db_path: str = Field(default="{$OPENBOT_HOMESPACE}/memory/memory.db")
@@ -36,7 +36,7 @@ class BotFlowConfig(BaseModel):
     port: int = Field(default=8000)
     debug: bool = Field(default=False)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
 
 class ConfigManager:
@@ -45,9 +45,9 @@ class ConfigManager:
     def __init__(self, config_path: Union[str, Path]):
         self._config_path = Path(config_path)
         self.env_file = self._config_path.parent / ".env"
+        self._raw_config_dict = {}
 
         config_dict = self._load_config(self._config_path)
-        self._raw_config_dict = {}
         self._config = BotFlowConfig(**config_dict)
         self._validate_config()
 
@@ -65,6 +65,11 @@ class ConfigManager:
 
     def _load_config(self, config_path: Path) -> dict:
         """加载配置文件"""
+        # 首先加载 .env 文件中的环境变量
+        if self.env_file.exists():
+            from dotenv import load_dotenv
+            load_dotenv(self.env_file, override=True)
+        
         if config_path and os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 config_dict = json.load(f)

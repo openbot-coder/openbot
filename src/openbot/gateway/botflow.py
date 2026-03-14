@@ -462,7 +462,6 @@ class BotFlow:
             memory=InMemoryMemory(),
             formatter=formatter,
             max_iters=max_iters,
-            verbose=verbose,
             print_hint_msg=False,
         )
 

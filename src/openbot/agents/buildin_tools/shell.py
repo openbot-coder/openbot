@@ -5,6 +5,7 @@
 
 import asyncio
 import locale
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -12,7 +13,7 @@ from typing import Optional
 from agentscope.message import TextBlock
 from agentscope.tool import ToolResponse
 
-WORKING_DIR = Path.home() / ".openbot"
+WORKING_DIR = Path(os.environ.get("OPENBOT_WORKING_DIR", "."))
 
 
 # pylint: disable=too-many-branches

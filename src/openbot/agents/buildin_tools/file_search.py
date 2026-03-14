@@ -15,7 +15,7 @@ from agentscope.tool import ToolResponse
 
 from .file_io import _resolve_file_path
 
-WORKING_DIR = Path(os.environ.get("OPENBOT_WORKING_DIR", "."))
+WORKING_DIR = Path(os.environ.get("OPENBOT_WORKING_DIR", "workspace"))
 
 # 跳过二进制文件/大文件
 _BINARY_EXTENSIONS = frozenset(

@@ -1,0 +1,9 @@
+{
+    "work_dir": "workspace",
+    "model_configs": {},
+    "mcp_config_path": "{$OPENBOT_HOMESPACE}/config/mcp.json",
+    "db_path": "{$OPENBOT_HOMESPACE}/memory/memory.db",
+    "host": "127.0.0.1",
+    "port": 8000,
+    "debug": false
+}

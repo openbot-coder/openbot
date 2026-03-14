@@ -11,7 +11,7 @@ from agentscope.message import TextBlock
 from agentscope.tool import ToolResponse
 
 
-WORKING_DIR = Path(os.environ.get("OPENBOT_WORKING_DIR", "."))
+WORKING_DIR = Path(os.environ.get("OPENBOT_WORKING_DIR", "workspace"))
 
 
 def _resolve_file_path(file_path: str) -> str:
