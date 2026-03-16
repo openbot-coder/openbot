@@ -1,7 +1,8 @@
-from typing import Dict, Type, Tuple, Union, List, Any, Sequence
+from typing import Dict, Type, Tuple, Union, List, Any, Sequence, Optional, AsyncGenerator, Literal
 
 from agentscope.model import (
     ChatModelBase,
+    ChatResponse,
     OpenAIChatModel,
     AnthropicChatModel,
     DashScopeChatModel,
@@ -20,8 +21,24 @@ from openbot.config import ModelConfig
 from openbot.utils.tool_messages_utils import _sanitize_tool_messages
 
 
-class ModelManager:
-    """模型管理类"""
+class ModelManager(ChatModelBase):
+    """模型管理类 - 同时作为 ChatModelBase 使用
+
+    该类继承自 ChatModelBase，可以直接作为聊天模型实例使用。
+    同时保留了管理多个模型配置的能力。
+
+    使用方式：
+        1. 作为单个模型使用（推荐）：
+            manager = ModelManager(model_configs, default_model_id="gpt-4o")
+            response = await manager(messages)
+
+        2. 获取特定模型：
+            model, formatter = manager.build_chatmodel("gpt-4o")
+
+    Args:
+        model_configs: 模型配置字典，key 为 model_id
+        default_model_id: 默认使用的模型 ID，默认为第一个配置的模型
+    """
 
     _MODEL_MAP: Dict[str, Type[ChatModelBase]] = {
         "openai": OpenAIChatModel,
@@ -39,12 +56,39 @@ class ModelManager:
         "ollama": OllamaChatFormatter,
     }
 
-    def __init__(self, model_configs: Dict[str, ModelConfig]):
+    def __init__(
+        self,
+        model_configs: Dict[str, ModelConfig],
+        default_model_id: Optional[str] = None,
+    ):
+        # 确定默认模型
+        if default_model_id is None and model_configs:
+            default_model_id = next(iter(model_configs))
+        
+        # 获取默认模型配置用于初始化父类
+        default_cfg = model_configs.get(default_model_id) if default_model_id else None
+        
+        # 调用父类初始化
+        super().__init__(
+            model_name=default_cfg.model if default_cfg else "",
+            stream=default_cfg.stream if default_cfg else False,
+        )
+        
         self._model_configs = model_configs
         self._active_models: Dict[str, ChatModelBase] = {}
         self._formatters: Dict[str, FormatterBase] = {}
-        self._default_model = None
+        self._default_model_id: Optional[str] = default_model_id
         self._formatter_cache: Dict[Type[FormatterBase], Type[FormatterBase]] = {}
+
+    @property
+    def default_model_id(self) -> Optional[str]:
+        """获取默认模型 ID"""
+        return self._default_model_id
+
+    @property
+    def available_models(self) -> List[str]:
+        """获取所有可用的模型 ID 列表"""
+        return list(self._model_configs.keys())
 
     def _create_model_and_formatter(
         self, cfg: ModelConfig
@@ -157,7 +201,14 @@ class ModelManager:
         return EnhancedFormatter
 
     def build_chatmodel(self, model_id: str) -> Tuple[ChatModelBase, FormatterBase]:
-        """获取指定模型配置"""
+        """获取指定模型配置
+        
+        Args:
+            model_id: 模型配置ID
+            
+        Returns:
+            Tuple[ChatModelBase, FormatterBase]: 模型实例和对应的 formatter
+        """
         if model_id in self._active_models:
             return self._active_models[model_id], self._formatters.get(model_id)
 
@@ -168,6 +219,69 @@ class ModelManager:
         self._active_models[model_id] = model
         self._formatters[model_id] = formatter
         return model, formatter
+
+    async def __call__(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict]] = None,
+        tool_choice: Optional[Literal["auto", "none", "required"] | str] = None,
+        **kwargs: Any,
+    ) -> ChatResponse | AsyncGenerator[ChatResponse, None]:
+        """直接调用默认模型进行对话
+        
+        该方法继承自 ChatModelBase，使 ModelManager 可以直接作为聊天模型使用。
+        调用时会自动使用默认模型（default_model_id）进行响应。
+
+        Args:
+            messages: 消息列表
+            tools: 可用的工具列表
+            tool_choice: 工具选择模式
+            **kwargs: 其他参数
+            
+        Returns:
+            ChatResponse 或 AsyncGenerator: 模型响应
+        """
+        if not self._default_model_id:
+            raise ValueError("No default model configured")
+        
+        model, _ = self.build_chatmodel(self._default_model_id)
+        return await model(messages, tools=tools, tool_choice=tool_choice, **kwargs)
+
+    def get_model(self, model_id: Optional[str] = None) -> ChatModelBase:
+        """获取模型实例
+        
+        如果未指定 model_id，则返回默认模型。
+
+        Args:
+            model_id: 模型配置ID，默认使用 default_model_id
+            
+        Returns:
+            ChatModelBase: 模型实例
+        """
+        target_model_id = model_id or self._default_model_id
+        if not target_model_id:
+            raise ValueError("No model ID specified and no default model configured")
+        
+        model, _ = self.build_chatmodel(target_model_id)
+        return model
+
+    def get_formatter(self, model_id: Optional[str] = None) -> FormatterBase:
+        """获取模型对应的 formatter
+        
+        如果未指定 model_id，则返回默认模型的 formatter。
+
+        Args:
+            model_id: 模型配置ID，默认使用 default_model_id
+            
+        Returns:
+            FormatterBase: formatter 实例
+        """
+        target_model_id = model_id or self._default_model_id
+        if not target_model_id:
+            raise ValueError("No model ID specified and no default model configured")
+        
+        _, formatter = self.build_chatmodel(target_model_id)
+        return formatter
 
 
 if __name__ == "__main__":
